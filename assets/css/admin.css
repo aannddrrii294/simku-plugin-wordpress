@@ -1,0 +1,415 @@
+/* SIMKU admin UI — aligned with Reseller Product Manager style (clean WP admin look) */
+
+:root{
+  --simku-font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen-Sans,Ubuntu,Cantarell,"Helvetica Neue",sans-serif;
+  --simku-bg:#f0f0f1;
+  --simku-card:#ffffff;
+  --simku-border:#dcdcde;
+  --simku-text:#1d2327;
+  --simku-muted:#646970;
+  --simku-shadow:0 1px 2px rgba(0,0,0,.03);
+}
+
+body.toplevel_page_simku-keuangan,
+body.simku_page_fl-dashboard,
+body.simku_page_fl-add-transaction,
+body.simku_page_fl-transactions,
+body.simku_page_fl-reports,
+body.simku_page_fl-charts,
+body.simku_page_fl-add-chart,
+body.simku_page_fl-settings,
+body.simku_page_fl-logs,
+body.simku_page_fl-scan-struk,
+body.simku_page_fl-savings,
+body.simku_page_fl-add-saving,
+body.simku_page_fl-reminders,
+body.simku_page_fl-add-reminder,
+body.simku_page_fl-payment-reminders,
+body.simku_page_fl-add-payment-reminder{
+  background:var(--simku-bg) !important;
+  font-family:var(--simku-font) !important;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+.fl-wrap{
+  max-width:none;
+  /*
+    NOTE:
+    Admin pages use <div class="wrap fl-wrap">.
+    WordPress core gives .wrap a right margin (20px). If we force width:100%,
+    the element becomes 100% + margin-right → it overflows, making the right
+    spacing look like it's “stuck” to the edge.
+    Using width:auto lets WP margins work as intended.
+  */
+  width:auto;
+  box-sizing:border-box;
+  color:var(--simku-text);
+  font-family:var(--simku-font);
+}
+
+.fl-page-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+}
+.fl-wrap h1{
+  margin:0 0 12px 0;
+  font-size:24px;
+  font-weight:700;
+}
+.fl-wrap h2{
+  margin:0 0 12px 0;
+  font-size:16px;
+  font-weight:600;
+}
+.fl-muted{ color: var(--simku-muted); font-size:12px; }
+
+/* Cards */
+.fl-card{
+  background:var(--simku-card);
+  border:1px solid var(--simku-border);
+  border-radius:14px;
+  padding:14px;
+  box-shadow:var(--simku-shadow);
+  overflow: visible;
+}
+.fl-card-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+  padding:0;
+  border:0;
+}
+.fl-card-body{
+  padding:0;
+}
+.fl-card-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.fl-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+
+.fl-card.fl-card-split{ padding:0; }
+.fl-card.fl-card-split .fl-card-head{ padding:14px 14px 0; margin-bottom:8px; }
+.fl-card.fl-card-split .fl-card-body{ padding:0 14px 14px; }
+
+/* Grid */
+.fl-grid{ display:grid; gap:12px; }
+.fl-grid-2{ grid-template-columns:1fr 1fr; }
+.fl-grid-3{ grid-template-columns:repeat(3,1fr); }
+@media (max-width: 960px){
+  .fl-grid-2,.fl-grid-3{ grid-template-columns:1fr; }
+}
+
+/* Forms */
+.fl-field{ margin-bottom:12px; }
+.fl-field label{
+  display:block;
+  font-weight:600;
+  margin:0 0 6px 0;
+}
+.fl-field .fl-help{
+  color: var(--simku-muted);
+  font-size:12px;
+  margin-top:4px;
+}
+.fl-wrap input[type="text"],
+.fl-wrap input[type="search"],
+.fl-wrap input[type="number"],
+.fl-wrap input[type="url"],
+.fl-wrap input[type="email"],
+.fl-wrap input[type="date"],
+.fl-wrap input[type="datetime-local"],
+.fl-wrap textarea,
+.fl-wrap select{
+  width:100%;
+  max-width:none;
+  box-sizing:border-box;
+}
+
+/* Button rows (keep WordPress default button styles) */
+.fl-btnrow{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+@media (max-width: 782px){
+  .fl-btnrow{ flex-direction:column; align-items:stretch; }
+}
+
+/* Tables */
+.fl-table-wrap{
+  overflow-x:auto !important;
+  overflow-y:visible !important;
+  border-radius:12px;
+  border:1px solid var(--simku-border);
+  background:#fff;
+}
+.fl-wrap table.widefat{
+  margin:0;
+  border:0;
+  box-shadow:none;
+}
+.fl-actions-col{ white-space:nowrap; }
+.fl-cell-wrap{ max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* KPI cards (used in Dashboard / Overview) */
+.fl-kpi{
+  background:#fff;
+  border:1px solid var(--simku-border);
+  border-radius:14px;
+  padding:14px;
+  box-shadow:var(--simku-shadow);
+}
+.fl-kpi-label{ color:var(--simku-muted); font-size:12px; font-weight:600; }
+.fl-kpi-value{ font-size:22px; font-weight:700; margin-top:4px; }
+
+/* Chart containers */
+.fl-chart-box{height:320px;min-height:280px;}
+.fl-chart-box-admin{height:260px;}
+.fl-dash-widget-block{margin:10px 0 18px;}
+.fl-dash-widget-title{font-weight:600;margin:0 0 6px;}
+
+/* Chart Builder layout */
+.fl-builder-shell{display:grid;grid-template-columns: 280px 1fr;gap:14px;margin-top:10px;}
+.fl-builder-shell.fl-sql-mode{grid-template-columns:1fr;}
+@media (max-width: 1100px){.fl-builder-shell{grid-template-columns:1fr;}}
+
+/* Helpers */
+.fl-inline{ display:flex; gap:8px; align-items:center; margin:12px 0; }
+.fl-template{ font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
+.fl-full{ grid-column:1 / -1; }
+.fl-mini{ padding:12px; border-radius:12px; background:#fafafa; border:1px solid #eee; }
+.fl-mini h3{ margin:0 0 10px; font-size:13px; font-weight:600; }
+.fl-pill{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; border:1px solid rgba(15,23,42,.10); background:rgba(255,255,255,.8); font-size:12px; font-weight:600; color:var(--simku-muted); }
+.fl-check label{ display:flex; gap:8px; align-items:center; font-weight:600; }
+.fl-check input[type="checkbox"]{ margin-top:0; }
+.fl-check-group{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.fl-code{ background:#0b1220; color:#e6edf3; border-radius:12px; padding:12px; overflow:auto; }
+.fl-wrap .notice{ border-radius:12px; }
+
+/* Kebab menu (header actions) */
+.fl-head-actions{ position:relative; display:inline-block; }
+.fl-kebab{
+  cursor:pointer;
+  border:1px solid transparent;
+  background:transparent;
+  border-radius:8px;
+  padding:0 10px;
+  height:34px;
+  line-height:32px;
+  font-size:18px;
+}
+.fl-kebab:hover{ background:#f0f0f1; border-color:#ccd0d4; }
+.fl-kebab-dots{ display:inline-block; transform: translateY(-1px); }
+.fl-menu{
+  position:absolute;
+  right:0;
+  top:38px;
+  background:#fff;
+  border:1px solid #ccd0d4;
+  border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+  min-width:220px;
+  padding:8px;
+  z-index:100000;
+}
+.fl-menu-item{
+  display:block;
+  width:100%;
+  text-align:left;
+  border:0;
+  background:transparent;
+  padding:8px 10px;
+  border-radius:8px;
+  cursor:pointer;
+}
+.fl-menu-item:hover{ background:#f0f0f1; }
+
+/* Spacing helpers */
+.fl-mt{ margin-top:12px; }
+.fl-mt-sm{ margin-top:8px; }
+
+/* KPI grid */
+.fl-kpis{ display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+@media (max-width: 960px){ .fl-kpis{ grid-template-columns:1fr; } }
+
+/* Filter forms */
+.fl-dashboard-filter label{ display:flex; align-items:center; gap:6px; margin:0; }
+.fl-dashboard-filter label input,
+.fl-dashboard-filter label select{ width:auto; }
+.fl-inline label select{ width:auto; }
+
+
+/* --------------------------------------------------------------------------
+   Mobile-first UI refinements (tables/charts/buttons + line-items labels)
+   -------------------------------------------------------------------------- */
+
+.fl-wrap .notice {
+  margin: 12px 0;
+}
+
+/* Filter grid (Transactions list) */
+.fl-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.fl-filters-grid .fl-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+/* Line-items (Add Transaction & Scan Receipt) */
+.simak-line-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.simak-line-item-head,
+.simak-line-item-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 120px 34px;
+  gap: 8px;
+  align-items: center;
+}
+.simak-line-item-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: #57606a;
+  padding: 0 2px;
+}
+.simak-line-item-row .simak-remove-row {
+  min-width: 34px;
+  height: 34px;
+  line-height: 1;
+  padding: 0;
+}
+
+/* Tables: allow horizontal scroll on small screens (avoid “vertical text”) */
+.fl-table-wrap table.widefat {
+  table-layout: auto;
+}
+
+/* Ensure code/ids don't break character-by-character */
+.fl-table-wrap code,
+.fl-table-wrap td code {
+  white-space: nowrap;
+}
+
+@media (max-width: 782px) {
+  /* Symmetric page gutter on mobile (left/right) */
+  .wrap.fl-wrap{
+    margin-left:12px !important;
+    margin-right:12px !important;
+  }
+
+  /* Buttons should feel “full width” on mobile */
+  .fl-btnrow .button,
+  .fl-actions .button,
+  .fl-actions .button-primary {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  .fl-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* Dashboard chart filter: nicer 2-column layout on mobile */
+  .fl-dashboard-filter {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: end;
+  }
+  .fl-dashboard-filter label {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    margin: 0;
+  }
+  .fl-dashboard-filter input,
+  .fl-dashboard-filter select {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .fl-dashboard-filter button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  /* Line-items grid tight for phone screens */
+  .simak-line-item-head,
+  .simak-line-item-row {
+    grid-template-columns: 1fr 70px 90px 34px;
+    gap: 6px;
+  }
+
+  /* Tables become horizontally scrollable (instead of squishing columns) */
+  .fl-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .fl-table-wrap table.widefat {
+    width: max-content;
+    min-width: 760px;
+  }
+  .fl-table-wrap th,
+  .fl-table-wrap td {
+    white-space: nowrap;
+  }
+
+  /* Chart boxes should not overflow container */
+  .fl-chart-box,
+  .fl-chart-box-admin {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  /* Give ECharts more vertical room so axis/tooltip/labels don't collide */
+  .fl-chart-box { height: 320px; min-height: 300px; }
+  .fl-chart-box-admin { height: 260px; }
+}
+
+
+
+/* Custom file picker (avoid huge native input area) */
+.fl-filepicker{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.fl-hidden-file{
+  position:absolute !important;
+  left:-9999px !important;
+  width:1px !important;
+  height:1px !important;
+  overflow:hidden !important;
+}
+.fl-file-names{
+  font-size:12px;
+  color:#6b7280;
+}
+.fl-tags{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.fl-tag{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border:1px solid #e5e7eb;
+  border-radius:999px;
+  background:#fff;
+  font-size:12px;
+}
