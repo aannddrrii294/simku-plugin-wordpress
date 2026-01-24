@@ -2,7 +2,7 @@
 /**
  * Plugin Name: SIMKU (Finance Manager)
  * Description: Financial management: track income/expenses, savings/investments, dashboards (ECharts), reports, spending limits & notifications. Supports n8n and external databases.
- * Version: 0.5.69
+ * Version: 0.5.89.3
  * Author: SIMKU
  * License: GPLv2 or later
  */
@@ -10,7 +10,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class SIMAK_App_Simak {
-  const VERSION = '0.5.69';
+  const VERSION = '0.5.89.3';
 
     const OPT_SETTINGS = 'simak_settings_v1';
     const OPT_CHARTS   = 'simak_charts_v1';
@@ -375,6 +375,11 @@ final class SIMAK_App_Simak {
                     . "Status: {status}\n"
                     . "Notes: {notes}\n",
             ],
+            'n8n' => [
+                'webhook_url' => '',
+                'api_key' => '',
+                'timeout' => 90,
+            ],
         ];
     }
 
@@ -598,6 +603,17 @@ final class SIMAK_App_Simak {
     private function settings() : array {
         $s = get_option(self::OPT_SETTINGS, self::default_settings());
         if (!is_array($s)) $s = self::default_settings();
+
+        // Backward compatible: ensure new keys exist.
+        $def_n8n = (array)(self::default_settings()['n8n'] ?? ['webhook_url'=>'','api_key'=>'','timeout'=>90]);
+        if (!isset($s['n8n']) || !is_array($s['n8n'])) {
+            $s['n8n'] = $def_n8n;
+        } else {
+            foreach ($def_n8n as $k=>$v) {
+                if (!array_key_exists($k, $s['n8n'])) $s['n8n'][$k] = $v;
+            }
+        }
+
         return $s;
     }
 
@@ -1749,15 +1765,27 @@ private function send_email_new_tx(array $ctx) : bool {
      * - input  : tanggal_input (DATETIME)
      * - receipt : tanggal_struk if valid, else DATE(tanggal_input)
      */
-    private function date_basis_expr(string $basis) : string {
-        $basis = $this->sanitize_date_basis($basis);
-        if ($basis === 'receipt') {
-            return "COALESCE(NULLIF(tanggal_struk,'0000-00-00'), DATE(tanggal_input))";
-        }
-        return 'tanggal_input';
+    
+private function date_basis_expr(string $basis) : string {
+    $basis = $this->sanitize_date_basis($basis);
+    if ($basis === 'receipt') {
+        return "COALESCE(NULLIF(tanggal_struk,'0000-00-00'), DATE(tanggal_input))";
     }
+    return 'tanggal_input';
+}
 
-    private function calc_totals_between(string $start_dt, string $end_dt, string $date_basis = 'input') : array {
+/**
+ * Resolve the user/login column name for the active datasource.
+ * Internal table uses `wp_user_login`, while some external tables use `user`/`username`.
+ */
+private function tx_user_col() : string {
+    foreach (['wp_user_login','user_login','user','username'] as $c) {
+        if ($this->ds_column_exists($c)) return $c;
+    }
+    return '';
+}
+
+private function calc_totals_between(string $start_dt, string $end_dt, string $date_basis = 'input', ?string $user_login = null) : array {
         // start_dt/end_dt are inclusive/exclusive.
         // - input: use 'Y-m-d H:i:s'
         // - receipt: use 'Y-m-d'
@@ -1773,17 +1801,56 @@ private function send_email_new_tx(array $ctx) : bool {
         $cats_in = implode(',', array_fill(0, count($expense_cats), '%s'));
 
         $date_expr = $this->date_basis_expr($date_basis);
+        $where_sql = "{$date_expr} >= %s AND {$date_expr} < %s";
 
-	        $sql = "SELECT LOWER(kategori) AS kategori,
-	                       SUM(CASE WHEN LOWER(kategori) = 'income' THEN (harga*quantity) ELSE 0 END) AS income_total,
-	                       SUM(CASE WHEN LOWER(kategori) IN ($cats_in) THEN (harga*quantity) ELSE 0 END) AS expense_total,
-	                       SUM(harga*quantity) AS amount_total
-	                FROM `{$table}`
-	                WHERE {$date_expr} >= %s AND {$date_expr} < %s
-	                GROUP BY LOWER(kategori)";
         // NOTE: placeholder order matters (left-to-right) — category placeholders appear
         // in the SELECT before the date placeholders in the WHERE.
         $params = array_merge($expense_cats, [$start_dt, $end_dt]);
+
+        // Optional user filter (matches Reports user dropdown).
+        // NOTE: Some installs store user as a numeric WP user ID (wp_user_id)
+        // instead of a login string. In that case, resolve login -> ID.
+        $user_col = $this->tx_user_col();
+        if ($user_login !== null && $user_login !== '' && $user_login !== 'all' && $user_login !== '0' && $user_col) {
+            $u_login = strtolower(trim((string)$user_login));
+
+            // Some environments submit a numeric WP user ID from the reports dropdown.
+            // If our transactions table stores the user as a *login string*,
+            // translate that ID back to user_login so filtering works.
+            if (ctype_digit($u_login) && !($user_col === 'wp_user_id' || substr($user_col, -3) === '_id')) {
+                $u_obj_by_id = get_user_by('id', (int) $u_login);
+                if ($u_obj_by_id && !empty($u_obj_by_id->user_login)) {
+                    $u_login = strtolower((string) $u_obj_by_id->user_login);
+                }
+            }
+
+            // Numeric user id columns.
+            $is_id_col = ($user_col === 'wp_user_id') || (substr($user_col, -3) === '_id');
+            if ($is_id_col) {
+                $u_obj = get_user_by('login', $u_login);
+                $u_id = $u_obj ? (int) $u_obj->ID : 0;
+                if ($u_id > 0) {
+                    $where_sql .= " AND `{$user_col}` = %d";
+                    $params[] = $u_id;
+                } else {
+                    // Unknown user -> force empty result.
+                    $where_sql .= " AND 1=0";
+                }
+            } else {
+                // String user columns (case-insensitive to be safe).
+                $where_sql .= " AND LOWER(`{$user_col}`) = %s";
+                $params[] = $u_login;
+            }
+        }
+
+        $sql = "SELECT LOWER(kategori) AS kategori,
+                       SUM(CASE WHEN LOWER(kategori) = 'income' THEN (harga*quantity) ELSE 0 END) AS income_total,
+                       SUM(CASE WHEN LOWER(kategori) IN ($cats_in) THEN (harga*quantity) ELSE 0 END) AS expense_total,
+                       SUM(harga*quantity) AS amount_total
+                FROM `{$table}`
+                WHERE {$where_sql}
+                GROUP BY LOWER(kategori)";
+
         $prepared = $db->prepare($sql, $params);
         if (!$prepared) {
             wp_send_json_error(['message'=>'SQL prepare failed', 'sql'=>$sql, 'params'=>$params]);
@@ -1946,23 +2013,23 @@ private function send_email_new_tx(array $ctx) : bool {
         echo '</div>';
 
         // Date range controls for dashboard charts (defaults last 7 days)
-        echo '<div class="fl-card fl-mt">';
+        echo '<div class="fl-card fl-mt simku-dashboard-filter-card">';
         echo '<div class="fl-card-head"><h2 style="margin:0">Dashboard Charts</h2><span class="fl-muted">Filter range</span></div>';
         echo '<div class="fl-card-body">';
-        echo '<form method="get" class="fl-inline fl-dashboard-filter">';
+        echo '<form method="get" class="simku-report-filter simku-dashboard-filter">';
         echo '<input type="hidden" name="page" value="fl-dashboard" />';
-        echo '<label>From <input type="date" name="from" value="'.esc_attr($from).'" /></label> ';
-        echo '<label>To <input type="date" name="to" value="'.esc_attr($to).'" /></label> ';
-        echo '<label>Group <select name="group">'
+        echo '<div class="simku-filter-field simku-filter-from"><label for="simku_report_from">From</label><input id="simku_report_from" type="date" name="from" value="'.esc_attr($from).'" /></div>';
+        echo '<div class="simku-filter-field simku-filter-to"><label for="simku_report_to">To</label><input id="simku_report_to" type="date" name="to" value="'.esc_attr($to).'" /></div>';
+        echo '<div class="simku-filter-field simku-filter-group"><label for="simku_dash_group">Group</label><select id="simku_dash_group" name="group">'
             .'<option value="daily"'.selected($group,'daily',false).'>Daily</option>'
             .'<option value="weekly"'.selected($group,'weekly',false).'>Weekly</option>'
             .'<option value="monthly"'.selected($group,'monthly',false).'>Monthly</option>'
-            .'</select></label> ';
-        echo '<label>Basis <select name="date_basis" class="fl-select">'
+            .'</select></div>';
+        echo '<div class="simku-filter-field simku-filter-basis"><label for="simku_dash_basis">Basis</label><select id="simku_dash_basis" name="date_basis" class="fl-select">'
             .'<option value="input"'.selected($date_basis,'input',false).'>Entry date</option>'
             .'<option value="receipt"'.selected($date_basis,'receipt',false).'>Purchase date</option>'
-            .'</select></label> ';
-        echo '<button class="button button-primary">Apply</button>';
+            .'</select></div>';
+        echo '<div class="simku-filter-actions"><button class="button button-primary">Apply</button></div>';
         echo '</form>';
         echo '</div>';
         echo '</div>';
@@ -2134,6 +2201,10 @@ private function send_email_new_tx(array $ctx) : bool {
         $count_sql = "SELECT COUNT(*) FROM `{$table}` WHERE {$where}";
         $total = $params ? (int)$db->get_var($db->prepare($count_sql, $params)) : (int)$db->get_var($count_sql);
 
+        // Pagination (used at top & bottom)
+        $total_pages = max(1, (int)ceil($total / $per_page));
+        $pagination_html = $this->render_pagination('fl-transactions', $page, $total_pages, $q);
+
         // User columns can differ per datasource (internal/external/legacy).
         $user_login_select = $user_login_col ? $user_login_col : 'NULL';
         $user_id_select = $user_id_col ? $user_id_col : 'NULL';
@@ -2156,16 +2227,16 @@ private function send_email_new_tx(array $ctx) : bool {
             echo '<div class="notice notice-warning"><p><b>External table needs user columns.</b> Click "Run Migration" in Settings → Datasource to add <code>wp_user_id</code> and <code>wp_user_login</code>.</p></div>';
         }
 
-        echo '<form method="get" class="fl-filters fl-card">';
+        echo '<form method="get" class="fl-filters fl-card simku-tx-filters">';
         echo '<input type="hidden" name="page" value="fl-transactions" />';
         echo '<div class="fl-filters-grid">';
 
-        echo '<div class="fl-field">';
+        echo '<div class="fl-field fl-field-search">';
         echo '<label>Search</label>';
         echo '<input type="search" name="s" value="'.esc_attr($q['s']).'" placeholder="Search…" />';
         echo '</div>';
 
-        echo '<div class="fl-field">';
+        echo '<div class="fl-field fl-field-category">';
         echo '<label>Category</label>';
         echo '<select name="kategori"><option value="">All categories</option>';
         foreach (['expense','income','saving','invest'] as $cat) {
@@ -2175,9 +2246,9 @@ private function send_email_new_tx(array $ctx) : bool {
         echo '</div>';
 
         if ($user_login_col) {
-            echo '<div class="fl-field">';
+            echo '<div class="fl-field fl-field-user">';
             echo '<label>User</label>';
-            echo '<select name="user"><option value="">All users</option>';
+            echo '<select name="user"><option value="">All users</option>' ;
             foreach ((array)$user_options as $uopt) {
                 $uopt = (string)$uopt;
                 if ($uopt === '') { continue; }
@@ -2187,12 +2258,12 @@ private function send_email_new_tx(array $ctx) : bool {
             echo '</div>';
         }
 
-        echo '<div class="fl-field">';
+        echo '<div class="fl-field fl-field-from">';
         echo '<label>From</label>';
         echo '<input type="date" name="date_from" value="'.esc_attr($q['date_from']).'" />';
         echo '</div>';
 
-        echo '<div class="fl-field">';
+        echo '<div class="fl-field fl-field-to">';
         echo '<label>To</label>';
         echo '<input type="date" name="date_to" value="'.esc_attr($q['date_to']).'" />';
         echo '</div>';
@@ -2281,16 +2352,7 @@ private function send_email_new_tx(array $ctx) : bool {
         echo '</tbody></table></div>';
 
         // Pagination
-        $total_pages = (int)ceil($total / $per_page);
-        if ($total_pages > 1) {
-            echo '<div class="tablenav"><div class="tablenav-pages">';
-            for ($p=1; $p<=$total_pages; $p++) {
-                $u = add_query_arg(array_merge(['page'=>'fl-transactions','paged'=>$p], array_filter($q)), admin_url('admin.php'));
-                if ($p === $page) echo '<span class="page-numbers current">'.esc_html($p).'</span>';
-                else echo '<a class="page-numbers" href="'.esc_url($u).'">'.esc_html($p).'</a>';
-            }
-            echo '</div></div>';
-        }
+        echo $pagination_html;
 
         echo '<hr class="fl-hr">';
         echo '<form method="post">';
@@ -2496,8 +2558,8 @@ private function send_email_new_tx(array $ctx) : bool {
         // Use the same responsive filter layout as dashboard (2-column grid on mobile)
         echo '<form method="get" class="fl-inline fl-dashboard-filter fl-mt">';
         echo '<input type="hidden" name="page" value="fl-savings" />';
-        echo '<label>From <input type="date" name="from" value="'.esc_attr($from).'" /></label> ';
-        echo '<label>To <input type="date" name="to" value="'.esc_attr($to).'" /></label> ';
+        echo '<div class="simku-filter-field simku-filter-from"><label for="simku_report_from">From</label><input id="simku_report_from" type="date" name="from" value="'.esc_attr($from).'" /></div>';
+        echo '<div class="simku-filter-field simku-filter-to"><label for="simku_report_to">To</label><input id="simku_report_to" type="date" name="to" value="'.esc_attr($to).'" /></div>';
         echo '<label>Group <select name="group">'
             .'<option value="daily"'.selected($group,'daily',false).'>Daily</option>'
             .'<option value="weekly"'.selected($group,'weekly',false).'>Weekly</option>'
@@ -2848,7 +2910,6 @@ private function send_email_new_tx(array $ctx) : bool {
         echo '<input type="hidden" name="fl_add_saving" value="1" />';
         echo '<input type="hidden" name="fl_mode" value="'.esc_attr($edit_mode ? 'edit' : 'create').'" />';
 
-        echo '<label>User <input type="text" name="user" value="'.esc_attr($user->user_login ?? '').'" readonly /></label>';
         echo '<label>Line ID (PK) <input type="text" name="line_id" value="'.esc_attr($edit_mode ? ($existing['line_id'] ?? '') : '').'" '.($edit_mode ? 'readonly' : '').' placeholder="'.esc_attr($edit_mode ? '' : 'Auto generated if empty').'" /></label>';
         echo '<label>Saving ID <input type="text" name="saving_id" value="'.esc_attr($edit_mode ? ($existing['saving_id'] ?? '') : '').'" '.($edit_mode ? 'readonly' : '').' placeholder="'.esc_attr($edit_mode ? '' : 'Auto generated if empty').'" /></label>';
         echo '<label>Account name <input type="text" name="account_name" value="'.esc_attr($edit_mode ? ($existing['account_name'] ?? '') : '').'" placeholder="e.g. Emergency Fund" required /></label>';
@@ -3601,7 +3662,6 @@ echo '<td>';
         wp_nonce_field('fl_save_reminder');
         echo '<input type="hidden" name="fl_save_reminder" value="1" />';
 
-        echo '<label>User <input type="text" value="'.esc_attr($user->user_login ?? '').'" readonly /></label>';
         if (!$editing) {
             echo '<label>Line ID (PK) <input type="text" name="line_id" placeholder="Auto generated if empty" /></label>';
         } else {
@@ -3721,7 +3781,7 @@ if (!empty($existing_imgs)) {
             if ($cat === 'income') $income += $amt;
             else $expense += $amt;
         }
-        $balance = $income - $expense;
+        // Balance is intentionally omitted from this PDF summary (Income/Expense only)
 
         $lines = [];
         $lines[] = $title;
@@ -3729,8 +3789,8 @@ if (!empty($existing_imgs)) {
         $lines[] = "Range: " . (($filters['date_from'] ?? '') ?: '-') . " to " . (($filters['date_to'] ?? '') ?: '-');
         $lines[] = "Category: " . (($filters['kategori'] ?? '') ?: 'All') . " | Search: " . (($filters['s'] ?? '') ?: '-');
         $lines[] = str_repeat('-', 92);
-        $lines[] = sprintf("Summary  | Income: Rp %s | Expense: Rp %s | Balance: Rp %s",
-            number_format_i18n($income), number_format_i18n($expense), number_format_i18n($balance)
+        $lines[] = sprintf("Summary  | Income: Rp %s | Expense: Rp %s",
+            number_format_i18n($income), number_format_i18n($expense)
         );
         $lines[] = str_repeat('-', 92);
         $lines[] = "Transactions";
@@ -3771,53 +3831,529 @@ if (!empty($existing_imgs)) {
         exit;
     }
 
-	    private function export_pdf_report(string $title, array $tot, array $meta = []) : void {
-	        if (headers_sent()) return;
+	    
+private function export_pdf_report(string $title, array $tot, array $meta = []) : void {
+        $generated = wp_date('Y-m-d H:i:s');
+        $range_display = (string)($meta['range_display'] ?? ($meta['range'] ?? ''));
+        $start_dt = (string)($meta['start_dt'] ?? '');
+        $end_dt = (string)($meta['end_dt'] ?? '');
+        $date_basis = $this->sanitize_date_basis((string)($meta['date_basis'] ?? 'input'));
+        $user_login = (string)($meta['user_login'] ?? '');
 
-	        $generated = wp_date('Y-m-d H:i:s');
-	        $range = ($meta['range'] ?? '') ?: '-';
-	        $group = ($meta['group'] ?? '') ?: '-';
+        // Fetch detailed rows for the report table (per-item rows).
+        $rows = [];
+        $truncated = false;
+        if ($start_dt !== '' && $end_dt !== '') {
+            $limit = 2000;
+            $rows = $this->fetch_report_detail_rows($start_dt, $end_dt, $date_basis, $limit + 1, ($user_login !== '' && $user_login !== 'all' && $user_login !== '0') ? $user_login : null);
+            if (count($rows) > $limit) {
+                $truncated = true;
+                $rows = array_slice($rows, 0, $limit);
+            }
+        }
 
-	        $lines = [];
-	        $lines[] = $title;
-	        $lines[] = "Generated: {$generated}";
-	        $lines[] = "Range: {$range}";
-	        if (!empty($meta['group'])) {
-	            $lines[] = "Group: {$group}";
-	        }
-	        $lines[] = str_repeat('-', 92);
-	        $lines[] = sprintf("Summary  | Income: Rp %s | Expense: Rp %s | Balance: Rp %s",
-	            number_format_i18n((float)($tot['income'] ?? 0)),
-	            number_format_i18n((float)($tot['expense'] ?? 0)),
-	            number_format_i18n((float)($tot['balance'] ?? 0))
-	        );
-	        $lines[] = str_repeat('-', 92);
-	        $lines[] = 'Breakdown (amount_total)';
-	        $lines[] = str_repeat('-', 92);
+        $pages = $this->build_report_pdf_pages($title, $generated, $range_display, $tot, $rows, $truncated);
+        $pdf = $this->simple_pdf_pages($pages, [
+            'F1' => 'Helvetica',
+            'F2' => 'Helvetica-Bold',
+            'F3' => 'Helvetica-Oblique',
+        ]);
 
-	        $by_cat = (array)($tot['by_cat'] ?? []);
-	        if (empty($by_cat)) {
-	            $lines[] = 'No data for selected range.';
-	        } else {
-	            foreach ($by_cat as $cat => $amt) {
-	                $lines[] = sprintf("- %s: Rp %s", (string)$cat, number_format_i18n((float)$amt));
-	            }
-	        }
+        $filename = sanitize_file_name(strtolower(str_replace([' ',':'], '_', $title))).'.pdf';
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="'.$filename.'"');
+        echo $pdf;
+        exit;
+    }
 
-	        $text = implode("\n", $lines);
-	        $pdf = $this->simple_text_pdf($text);
+    
+private function fetch_report_detail_rows(string $start_dt, string $end_dt, string $date_basis, int $limit = 2000, ?string $user_login = null) : array {
+    $db = $this->ds_db();
+    if (!($db instanceof wpdb)) return [];
 
-	        while (ob_get_level()) { ob_end_clean(); }
-	        nocache_headers();
-	        header('Content-Type: application/pdf');
-	        header('Content-Disposition: attachment; filename="simku-report.pdf"');
-	        header('Content-Length: ' . strlen($pdf));
-	        echo $pdf;
-	        exit;
-	    }
+    $table = $this->ds_table();
+    $date_expr = $this->date_basis_expr($date_basis);
 
+    $purchase_expr = $this->ds_column_exists('tanggal_struk') ? "DATE(tanggal_struk)" : "NULL";
+    $entry_expr    = $this->ds_column_exists('tanggal_input') ? "tanggal_input" : "NULL";
 
-    private function simple_text_pdf(string $text) : string {
+    $select = "line_id, transaction_id, nama_toko, items, quantity, harga, kategori, {$purchase_expr} AS purchase_date, {$entry_expr} AS entry_date";
+
+    $where = "{$date_expr} >= %s AND {$date_expr} < %s";
+    $params = [$start_dt, $end_dt];
+
+    // Optional user filter (kept flexible for both internal and external datasources)
+    $user_col = $this->tx_user_col();
+    if ($user_login !== null && $user_login !== '' && $user_login !== 'all' && $user_login !== '0' && $user_col) {
+        $u_login = strtolower(trim((string)$user_login));
+
+        // Handle case where the dropdown submits a numeric WP user ID.
+        // When our transactions table stores the username (not an ID),
+        // translate the ID into a login so the filter works.
+        if (ctype_digit($u_login) && !($user_col === 'wp_user_id' || (strlen($user_col) >= 3 && substr($user_col, -3) === '_id'))) {
+            $u_by_id = get_user_by('id', (int)$u_login);
+            if ($u_by_id && isset($u_by_id->user_login)) {
+                $u_login = strtolower((string)$u_by_id->user_login);
+            }
+        }
+        if ($user_col === 'wp_user_id' || (strlen($user_col) >= 3 && substr($user_col, -3) === '_id')) {
+            $u = get_user_by('login', $u_login);
+            $uid = $u ? (int)$u->ID : 0;
+            if ($uid > 0) {
+                $where = "`{$user_col}` = %d AND {$where}";
+                $params = array_merge([$uid], $params);
+            } else {
+                $where = "1=0 AND {$where}";
+            }
+        } else {
+            $where = "LOWER(`{$user_col}`) = %s AND {$where}";
+            $params = array_merge([$u_login], $params);
+        }
+    }
+
+    $limit = max(1, (int)$limit);
+
+    $sql = "SELECT {$select}
+            FROM `{$table}`
+            WHERE {$where}
+            ORDER BY {$date_expr} DESC
+            LIMIT {$limit}";
+
+    $rows = $db->get_results($db->prepare($sql, ...$params), ARRAY_A);
+    return is_array($rows) ? $rows : [];
+}
+
+    
+private function build_report_pdf_pages(string $title, string $generated, string $range_display, array $tot, array $rows, bool $truncated) : array {
+        // Vector-PDF pages with basic text + grid table. Supports multi-page with repeating headers.
+        $page_w = 595; $page_h = 842; // A4 points
+        $left = 48; $right = 48;
+        $top = 780; $bottom = 60;
+
+        // Table layout
+        $headers = ['Purchase Date','Merchant','Category','Item','Qty','Price'];
+        // Make the Price column a bit wider so numbers don't stick to the right border.
+        // Keep overall table width the same by taking a bit from the Item column.
+        $col_w = [80, 100, 85, 140, 35, 55]; // total 495 (max content width is 595-48-48=499)
+        // Ensure table fits available width
+        $max_table_w = $page_w - $left - $right;
+        $table_w = array_sum($col_w);
+        if ($table_w > $max_table_w) {
+            // scale down proportionally (keep readability)
+            $scale = $max_table_w / $table_w;
+            foreach ($col_w as &$cw) { $cw = floor($cw * $scale); }
+            unset($cw);
+        }
+
+        // Wrap limits per column (characters per line). Heuristic for Helvetica at 9pt.
+        $wrap_max = [16, 20, 16, 30, 5, 14];
+
+        $font_size = 9;
+        $line_h = 11;          // line height in points inside table rows
+        $header_h = 24;        // header row height
+        $row_base_h = 22;      // minimum row height (1 line)
+
+        // Build printable rows: normalize keys + format values
+        $print_rows = [];
+        foreach ((array)$rows as $r) {
+            $purchase_raw = (string)($r['purchase_date'] ?? $r['tanggal_struk'] ?? $r['tanggal_receipt'] ?? $r['purchaseDate'] ?? '');
+            $entry_raw    = (string)($r['entry_date'] ?? $r['tanggal_input'] ?? $r['entryDate'] ?? '');
+            $purchase_disp = $this->fmt_date_short($purchase_raw);
+            if ($purchase_disp === '' && $entry_raw !== '') $purchase_disp = $this->fmt_date_short($entry_raw);
+
+            $merchant = (string)($r['nama_toko'] ?? $r['merchant'] ?? '');
+            $cat      = (string)($r['kategori'] ?? $r['category'] ?? '');
+            $item     = (string)($r['items'] ?? $r['item'] ?? '');
+            $qty      = (string)($r['quantity'] ?? $r['qty'] ?? '');
+            $price    = (float)($r['harga'] ?? $r['price'] ?? 0);
+
+            $print_rows[] = [
+                $purchase_disp ?: '',
+                $merchant ?: '',
+                $cat ?: '',
+                $item ?: '',
+                $qty ?: '',
+                'Rp ' . number_format_i18n($price),
+            ];
+        }
+
+        // If no rows, still show an empty table skeleton with a few blank lines.
+        if (empty($print_rows)) {
+            for ($i=0;$i<5;$i++) $print_rows[] = ['', '', '', '', '', ''];
+        }
+
+        $income  = 'Rp ' . number_format_i18n((float)($tot['income'] ?? 0));
+        $expense = 'Rp ' . number_format_i18n((float)($tot['expense'] ?? 0));
+        // Balance is intentionally omitted from the report PDF (Income/Expense only)
+
+        $pages = [];
+        $idx = 0;
+        $n = count($print_rows);
+        $page_no = 1;
+
+        while ($idx < $n) {
+            $s = "";
+
+            // Header block
+            $y = $top;
+            $s .= $this->pdf_text_cmd($left, $y, 18, $title, 'F2');
+            $s .= $this->pdf_text_cmd($page_w - $right - 170, $y + 2, 10, "Generated: {$generated}", 'F3');
+            $y -= 20;
+            if ($range_display !== '') {
+                $s .= $this->pdf_text_cmd($left, $y, 12, "Date: {$range_display}", 'F1');
+                $y -= 14;
+            }
+
+            $s .= $this->pdf_line_cmd($left, $y, $page_w - $right, $y, 0.8);
+            $y -= 18;
+
+            // Summary only on first page; page 2+ shows only the detail table.
+            if ($page_no === 1) {
+                $s .= $this->pdf_text_cmd($left, $y, 12, "Summary Report:", 'F2');
+                $y -= 14;
+                $s .= $this->pdf_text_cmd($left, $y, 12, "Income: {$income}", 'F1');
+                $y -= 12;
+                $s .= $this->pdf_text_cmd($left, $y, 12, "Expense: {$expense}", 'F1');
+                $y -= 12;
+                // Balance line removed
+
+                $s .= $this->pdf_line_cmd($left, $y, $page_w - $right, $y, 0.8);
+                $y -= 18;
+            }
+
+            $label = ($page_no === 1) ? "Detail transactions:" : "Detail transactions (continued):";
+            $s .= $this->pdf_text_cmd($left, $y, 12, $label, 'F2');
+            $y -= 12;
+
+            if ($truncated && $idx === 0) {
+                $s .= $this->pdf_text_cmd($left, $y, 10, "Note: showing first 2000 rows (filtered).", 'F3');
+                $y -= 12;
+            }
+
+            // Table region
+            $table_x = $left;
+            $table_top = $y;
+            $table_bottom = $bottom;
+            $avail_h = $table_top - $table_bottom;
+
+            // Decide how many rows fit on this page (variable row height due to wrapping)
+            $row_heights = [$header_h];
+            $page_row_wrapped = [];
+
+            $used_h = $header_h;
+            while ($idx < $n) {
+                $row = $print_rows[$idx];
+
+                $wrapped_cells = [];
+                $max_lines = 1;
+                foreach ($row as $cidx => $cell) {
+                    $cell = (string)$cell;
+                    $cell = $this->pdf_clean_text($cell);
+                    $lines = $this->pdf_wrap_text($cell, (int)($wrap_max[$cidx] ?? 20));
+                    $wrapped_cells[] = $lines;
+                    $max_lines = max($max_lines, count($lines));
+                }
+
+                $rh = max($row_base_h, $row_base_h + (($max_lines - 1) * $line_h));
+                // If this row doesn't fit, stop and render current page
+                if (($used_h + $rh) > $avail_h) break;
+
+                $row_heights[] = $rh;
+                $page_row_wrapped[] = $wrapped_cells;
+                $used_h += $rh;
+                $idx++;
+            }
+
+            // Ensure at least one row to avoid infinite loop
+            if (empty($page_row_wrapped)) {
+                $wrapped_cells = [];
+                foreach ($print_rows[$idx] as $cidx => $cell) {
+                    $cell = $this->pdf_clean_text((string)$cell);
+                    $wrapped_cells[] = $this->pdf_wrap_text($cell, (int)($wrap_max[$cidx] ?? 20));
+                }
+                $row_heights[] = $row_base_h;
+                $page_row_wrapped[] = $wrapped_cells;
+                $idx++;
+            }
+
+            // Draw grid
+            $s .= $this->pdf_table_grid_var_cmd($table_x, $table_top, $col_w, $row_heights, 0.8);
+
+            // Header text in table
+            $x = $table_x;
+            $header_y = $table_top - 16;
+            foreach ($headers as $cidx => $h) {
+                $s .= $this->pdf_text_cmd($x + 4, $header_y, $font_size, $h, 'F2');
+                $x += $col_w[$cidx];
+            }
+
+            // Data rows
+            $y_cursor_top = $table_top - $header_h; // top line of first data row
+            foreach ($page_row_wrapped as $ridx => $wrapped_cells) {
+                $rh = $row_heights[$ridx + 1];
+                $row_top = $y_cursor_top; // top edge of row
+                $first_baseline = $row_top - 14;
+
+                $x = $table_x;
+                foreach ($wrapped_cells as $cidx => $lines) {
+                    $li = 0;
+                    foreach ($lines as $line) {
+                        $s .= $this->pdf_text_cmd($x + 4, $first_baseline - ($li * $line_h), $font_size, $line, 'F1');
+                        $li++;
+                        // soft cap to avoid spilling far beyond row height (shouldn't happen)
+                        if (($li * $line_h) > ($rh - 12)) break;
+                    }
+                    $x += $col_w[$cidx];
+                }
+
+                $y_cursor_top -= $rh;
+            }
+
+            // Footer page number (centered)
+            $footer_label = "Page {$page_no}";
+            $approx_char_w = 4.6; // approx width for Helvetica 9pt
+            $fx = (int)round(($page_w / 2) - (($this->pdf_strlen($footer_label) * $approx_char_w) / 2));
+            $fy = 32;
+            $s .= $this->pdf_text_cmd($fx, $fy, 9, $footer_label, 'F3');
+
+            $pages[] = $s;
+            $page_no++;
+        }
+
+        return $pages;
+    }
+
+    private function fmt_date_short(string $date) : string {
+        $date = trim($date);
+        if ($date === '') return '';
+        // Accept YYYY-MM-DD or full datetime
+        $ts = strtotime($date);
+        if (!$ts) return '';
+        return wp_date('d/m/Y', $ts);
+    }
+
+    private function pdf_clean_text(string $text) : string {
+        // Normalize whitespace and avoid control chars that can break the PDF stream.
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text);
+        $text = preg_replace("/\s+/u", " ", $text);
+        return trim((string)$text);
+    }
+
+    private function pdf_strlen(string $text) : int {
+        if (function_exists('mb_strlen')) return (int)mb_strlen($text, 'UTF-8');
+        if ($text === '') return 0;
+        return (int)preg_match_all('/./us', $text, $m);
+    }
+
+    private function pdf_substr(string $text, int $start, int $len) : string {
+        if (function_exists('mb_substr')) return (string)mb_substr($text, $start, $len, 'UTF-8');
+        if ($text === '' || $len <= 0) return '';
+        preg_match_all('/./us', $text, $m);
+        $chars = $m[0] ?? [];
+        return implode('', array_slice($chars, $start, $len));
+    }
+
+    private function pdf_wrap_text(string $text, int $max_chars) : array {
+        $text = $this->pdf_clean_text($text);
+        if ($text === '') return [''];
+
+        $max_chars = max(4, $max_chars);
+        $words = preg_split('/\s+/u', $text) ?: [];
+        $lines = [];
+        $line = '';
+
+        foreach ($words as $w) {
+            $w = (string)$w;
+            if ($w === '') continue;
+
+            // If a single "word" is longer than max, split it safely
+            if ($this->pdf_strlen($w) > $max_chars) {
+                if ($line !== '') { $lines[] = $line; $line = ''; }
+                $pos = 0;
+                $wlen = $this->pdf_strlen($w);
+                while ($pos < $wlen) {
+                    $chunk = $this->pdf_substr($w, $pos, $max_chars);
+                    $lines[] = $chunk;
+                    $pos += $max_chars;
+                }
+                continue;
+            }
+
+            $candidate = ($line === '') ? $w : ($line . ' ' . $w);
+            if ($this->pdf_strlen($candidate) <= $max_chars) {
+                $line = $candidate;
+            } else {
+                if ($line !== '') $lines[] = $line;
+                $line = $w;
+            }
+        }
+
+        if ($line !== '') $lines[] = $line;
+        if (empty($lines)) $lines = [''];
+        return $lines;
+    }
+
+    private function pdf_table_grid_var_cmd(float $x, float $y_top, array $col_w, array $row_h, float $w = 0.8) : string {
+        $s = "";
+        $total_w = array_sum($col_w);
+        $total_h = array_sum($row_h);
+        $y_bottom = $y_top - $total_h;
+
+        // Horizontal lines (top + each row boundary)
+        $yy = $y_top;
+        $s .= $this->pdf_line_cmd($x, $yy, $x + $total_w, $yy, $w);
+        foreach ($row_h as $h) {
+            $yy -= (float)$h;
+            $s .= $this->pdf_line_cmd($x, $yy, $x + $total_w, $yy, $w);
+        }
+
+        // Vertical lines (full height)
+        $xx = $x;
+        $s .= $this->pdf_line_cmd($xx, $y_top, $xx, $y_bottom, $w);
+        foreach ($col_w as $cw) {
+            $xx += (float)$cw;
+            $s .= $this->pdf_line_cmd($xx, $y_top, $xx, $y_bottom, $w);
+        }
+
+        return $s;
+    }
+
+    private function pdf_truncate_text(string $text, int $max_chars) : string {
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
+        if ($max_chars <= 0) return '';
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            if (mb_strlen($text, 'UTF-8') <= $max_chars) return $text;
+            return mb_substr($text, 0, max(0, $max_chars - 1), 'UTF-8').'…';
+        }
+        if (strlen($text) <= $max_chars) return $text;
+        return substr($text, 0, max(0, $max_chars - 1)).'…';
+    }
+
+    private function pdf_escape_text(string $t) : string {
+        return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $t);
+    }
+
+    private function pdf_text_cmd(float $x, float $y, int $size, string $text, string $font = 'F1') : string {
+        $text = $this->pdf_escape_text($text);
+        $x = number_format($x, 2, '.', '');
+        $y = number_format($y, 2, '.', '');
+        $size = max(1, (int)$size);
+        return "BT /{$font} {$size} Tf 1 0 0 1 {$x} {$y} Tm ({$text}) Tj ET\n";
+    }
+
+    private function pdf_line_cmd(float $x1, float $y1, float $x2, float $y2, float $w = 0.8) : string {
+        $x1 = number_format($x1, 2, '.', '');
+        $y1 = number_format($y1, 2, '.', '');
+        $x2 = number_format($x2, 2, '.', '');
+        $y2 = number_format($y2, 2, '.', '');
+        $w = number_format(max(0.1, (float)$w), 2, '.', '');
+        return "{$w} w {$x1} {$y1} m {$x2} {$y2} l S\n";
+    }
+
+    private function pdf_table_grid_cmd(float $x, float $y_top, array $col_w, float $row_h, int $rows_count, float $w = 0.8) : string {
+        $x0 = (float)$x;
+        $x1 = $x0 + array_sum($col_w);
+        $w = number_format(max(0.1, (float)$w), 2, '.', '');
+        $s = "{$w} w\n";
+
+        // Horizontal lines
+        for ($i = 0; $i <= $rows_count; $i++) {
+            $yy = $y_top - ($i * $row_h);
+            $s .= number_format($x0, 2, '.', '').' '.number_format($yy, 2, '.', '').' m '
+                .number_format($x1, 2, '.', '').' '.number_format($yy, 2, '.', '')." l S\n";
+        }
+
+        // Vertical lines
+        $xx = $x0;
+        $s .= number_format($xx, 2, '.', '').' '.number_format($y_top, 2, '.', '').' m '
+            .number_format($xx, 2, '.', '').' '.number_format($y_top - ($rows_count * $row_h), 2, '.', '')." l S\n";
+
+        foreach ($col_w as $cw) {
+            $xx += (float)$cw;
+            $s .= number_format($xx, 2, '.', '').' '.number_format($y_top, 2, '.', '').' m '
+                .number_format($xx, 2, '.', '').' '.number_format($y_top - ($rows_count * $row_h), 2, '.', '')." l S\n";
+        }
+
+        return $s;
+    }
+
+    private function simple_pdf_pages(array $page_streams, array $fonts) : string {
+        $n = count($page_streams);
+        if ($n < 1) $page_streams = [""];
+
+        // Object id layout:
+        // 1: catalog
+        // 2: pages
+        // 3..(2n+2): page+content pairs
+        // fonts start at (2n+3)
+        $n = count($page_streams);
+        $font_keys = array_keys($fonts);
+        $font_ids = [];
+        $first_font_id = 3 + (2 * $n);
+
+        foreach ($font_keys as $i => $k) {
+            $font_ids[$k] = $first_font_id + $i;
+        }
+
+        $objects = [];
+
+        // 1 Catalog
+        $objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+
+        // 2 Pages (Kids filled later)
+        $kids = [];
+        for ($i = 0; $i < $n; $i++) {
+            $page_id = 3 + ($i * 2);
+            $kids[] = "{$page_id} 0 R";
+        }
+        $objects[2] = "<< /Type /Pages /Kids [ ".implode(' ', $kids)." ] /Count {$n} >>";
+
+        // Page objects and content objects
+        for ($i = 0; $i < $n; $i++) {
+            $page_id = 3 + ($i * 2);
+            $content_id = $page_id + 1;
+            $stream = (string)$page_streams[$i];
+            $len = strlen($stream);
+
+            $font_dict_parts = [];
+            foreach ($font_ids as $k => $fid) {
+                $font_dict_parts[] = "/{$k} {$fid} 0 R";
+            }
+            $font_dict = implode(' ', $font_dict_parts);
+
+            $objects[$page_id] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << {$font_dict} >> >> /Contents {$content_id} 0 R >>";
+            $objects[$content_id] = "<< /Length {$len} >>\nstream\n{$stream}\nendstream";
+        }
+
+        // Font objects
+        foreach ($fonts as $k => $base) {
+            $fid = $font_ids[$k];
+            $objects[$fid] = "<< /Type /Font /Subtype /Type1 /Name /{$k} /BaseFont /{$base} >>";
+        }
+
+        // Build final PDF with xref
+        $pdf = "%PDF-1.4\n";
+        $offsets = [0];
+
+        $max_id = max(array_keys($objects));
+        for ($i = 1; $i <= $max_id; $i++) {
+            $offsets[$i] = strlen($pdf);
+            $obj = $objects[$i] ?? '';
+            $pdf .= "{$i} 0 obj\n{$obj}\nendobj\n";
+        }
+
+        $xref_offset = strlen($pdf);
+        $pdf .= "xref\n0 ".($max_id + 1)."\n";
+        $pdf .= "0000000000 65535 f \n";
+        for ($i = 1; $i <= $max_id; $i++) {
+            $pdf .= sprintf("%010d 00000 n \n", $offsets[$i]);
+        }
+
+        $pdf .= "trailer\n<< /Size ".($max_id + 1)." /Root 1 0 R >>\nstartxref\n{$xref_offset}\n%%EOF";
+        return $pdf;
+    }
+
+private function simple_text_pdf(string $text) : string {
         // Minimal PDF (single page if possible) with Helvetica + Helvetica-Bold.
         // Supports a larger bold title on the first line.
         $lines = preg_split("/\r\n|\n|\r/", $text);
@@ -4168,7 +4704,14 @@ if (!empty($_POST['fl_bulk_csv_submit'])) {
                     $imgs = $existing_imgs;
                     $imgs = array_merge($imgs, $this->parse_image_urls_textarea(wp_unslash($_POST['gambar_url'] ?? '')));
 
-                    $uploaded_imgs = $this->handle_multi_image_upload('gambar_files');
+                    // Multi image upload (returns ['ok'=>bool,'urls'=>[],'error'=>string])
+                    $uploaded_imgs = [];
+                    $multi = $this->handle_multi_image_upload('gambar_files');
+                    if (!empty($multi['ok']) && !empty($multi['urls']) && is_array($multi['urls'])) {
+                        $uploaded_imgs = array_map('strval', $multi['urls']);
+                    } elseif (!empty($multi['error'])) {
+                        echo '<div class="notice notice-error"><p>'.esc_html((string)$multi['error']).'</p></div>';
+                    }
                     // Backward compat: older UI used single input name=gambar_file
                     $up = $this->handle_tx_image_upload('gambar_file');
                     if (!empty($up['ok']) && !empty($up['url'])) {
@@ -4451,7 +4994,7 @@ if ($bulk_result !== null) {
 }
 
 // Bulk CSV Import UI
-echo '<div class="fl-card fl-card-split" style="margin-top:12px;">';
+echo '<div class="fl-card fl-card-split simku-bulk-import fl-mt">';
 echo '<div class="fl-card-head"><h2 style="margin:0;">Bulk Import (CSV)</h2><div class="fl-help">Upload a CSV to add many transactions at once.</div></div>';
 echo '<div class="fl-card-body">';
 echo '<form method="post" enctype="multipart/form-data" class="fl-form fl-bulk-form">';
@@ -4478,7 +5021,7 @@ echo '</div></div>';
             echo '<div class="notice notice-warning"><p><b>External table needs user columns.</b> Go to <a href="'.esc_url(admin_url('admin.php?page=fl-settings#fl-datasource')).'">Settings → Datasource</a> and run migration.</p></div>';
         }
 
-        echo '<form method="post" enctype="multipart/form-data" class="fl-form">';
+        echo '<form method="post" enctype="multipart/form-data" class="fl-form simku-addtx-form">';
         wp_nonce_field('fl_save_tx');
         echo '<input type="hidden" name="fl_save_tx" value="1" />';
 
@@ -4645,7 +5188,121 @@ echo '</div></div>';
         return plugin_dir_path(__FILE__) . 'ocr/receipt_ocr.py';
     }
 
+
+    private function get_n8n_scan_config() : array {
+        // Returns [url, api_key, timeout]
+        $s = $this->settings();
+        $cfg = is_array($s['n8n'] ?? null) ? $s['n8n'] : [];
+
+        $url = defined('SIMKU_N8N_WEBHOOK_URL') ? trim((string)SIMKU_N8N_WEBHOOK_URL) : '';
+        if ($url === '') $url = trim((string)($cfg['webhook_url'] ?? ''));
+
+        $api_key = defined('SIMKU_N8N_API_KEY') ? trim((string)SIMKU_N8N_API_KEY) : '';
+        if ($api_key === '') $api_key = trim((string)($cfg['api_key'] ?? ''));
+
+        $timeout = defined('SIMKU_N8N_TIMEOUT') ? (int)SIMKU_N8N_TIMEOUT : 0;
+        if ($timeout <= 0) $timeout = (int)($cfg['timeout'] ?? 90);
+        if ($timeout < 10) $timeout = 10;
+        if ($timeout > 180) $timeout = 180;
+
+        if ($url === '') return ['', '', $timeout];
+        return [$url, $api_key, $timeout];
+    }
+
+
     private function receipt_ocr_run(string $image_path) : array {
+        // If configured, prefer n8n webhook (Gemini/AI) instead of local python+tesseract.
+        // Configure in wp-config.php:
+        //   define('SIMKU_N8N_WEBHOOK_URL', 'https://<your-n8n>/webhook/<id>');
+        //   define('SIMKU_N8N_API_KEY', 'optional_shared_secret');
+        //   define('SIMKU_N8N_TIMEOUT', 90);
+        [$n8n_url, $api_key, $timeout] = $this->get_n8n_scan_config();
+        if ($n8n_url !== '') {
+            return $this->receipt_ocr_run_n8n($image_path, $n8n_url, $api_key, $timeout);
+        }
+
+        // Fallback: legacy python OCR.
+        return $this->receipt_ocr_run_python($image_path);
+    }
+
+    private function receipt_ocr_run_n8n(string $image_path, string $url, string $api_key = '', int $timeout = 90) : array {
+        // Returns: ['ok'=>bool, 'data'=>array|null, 'error'=>string|null, 'raw'=>string]
+
+        if (!function_exists('wp_remote_post')) {
+            return ['ok'=>false, 'data'=>null, 'error'=>'wp_remote_post is not available on this site.', 'raw'=>''];
+        }
+
+        $bin = @file_get_contents($image_path);
+        if ($bin === false) {
+            return ['ok'=>false, 'data'=>null, 'error'=>'Failed to read uploaded image file.', 'raw'=>''];
+        }
+
+        $ft = function_exists('wp_check_filetype') ? wp_check_filetype($image_path) : ['type' => ''];
+        $mime = (string)($ft['type'] ?? '');
+        if ($mime === '') $mime = 'application/octet-stream';
+
+        $payload = [
+            'filename' => basename($image_path),
+            'mime' => $mime,
+            'image_base64' => base64_encode($bin),
+            'mode' => 'preview',
+        ];
+
+        $headers = [
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+        ];
+        $api_key = trim((string)$api_key);
+        if ($api_key !== '') {
+            $headers['X-API-Key'] = $api_key;
+        }
+
+        $timeout = (int)$timeout;
+        if ($timeout < 10) $timeout = 10;
+        if ($timeout > 180) $timeout = 180;
+
+        $resp = wp_remote_post($url, [
+            'headers' => $headers,
+            'timeout' => $timeout,
+            'body' => wp_json_encode($payload),
+        ]);
+
+        if (is_wp_error($resp)) {
+            return ['ok'=>false, 'data'=>null, 'error'=>'n8n request failed: ' . $resp->get_error_message(), 'raw'=>''];
+        }
+
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $raw = trim((string) wp_remote_retrieve_body($resp));
+
+        if ($code < 200 || $code >= 300) {
+            $msg = 'n8n returned HTTP ' . (string)$code;
+            if ($raw !== '') $msg .= ': ' . $raw;
+            return ['ok'=>false, 'data'=>null, 'error'=>$msg, 'raw'=>$raw];
+        }
+
+        $json = json_decode($raw, true);
+        if (!is_array($json)) {
+            return ['ok'=>false, 'data'=>null, 'error'=>'n8n response is not valid JSON.', 'raw'=>$raw];
+        }
+
+        // Allow both formats:
+        // 1) { ...data fields... }
+        // 2) { ok: true, data: { ... } }
+        $data = $json;
+        if (isset($json['data']) && is_array($json['data'])) {
+            $data = $json['data'];
+        }
+        if (!is_array($data)) {
+            return ['ok'=>false, 'data'=>null, 'error'=>'n8n response JSON has unexpected format.', 'raw'=>$raw];
+        }
+        if (!empty($data['error'])) {
+            return ['ok'=>false, 'data'=>null, 'error'=>(string)$data['error'], 'raw'=>$raw];
+        }
+
+        return ['ok'=>true, 'data'=>$data, 'error'=>null, 'raw'=>$raw];
+    }
+
+    private function receipt_ocr_run_python(string $image_path) : array {
         // Returns: ['ok'=>bool, 'data'=>array|null, 'error'=>string|null, 'raw'=>string]
         $script = $this->receipt_ocr_script_path();
         if (!file_exists($script)) {
@@ -4888,34 +5545,71 @@ echo '</div></div>';
         echo $this->page_header_html('Scan Receipt', '[simku_scan_struk]', '[simku page="scan-struk"]');
 
         // Diagnostics
+        [$n8n_url, $n8n_key, $n8n_timeout] = $this->get_n8n_scan_config();
+        $use_n8n = ($n8n_url !== '');
+
         $script_ok = file_exists($this->receipt_ocr_script_path());
         $python = defined('SIMKU_OCR_PYTHON') ? (string)SIMKU_OCR_PYTHON : 'python3';
         $diag_py = function_exists('shell_exec') ? @shell_exec(escapeshellcmd($python).' --version 2>&1') : '';
         $diag_py = trim((string)$diag_py);
 
-        echo '<div class="fl-card fl-mt">';
-        echo '<h2>Upload & Scan</h2>';
-        echo '<div class="fl-help">Upload a receipt photo. The system will run OCR and show a preview before saving to Transactions.</div>';
-        echo '<div class="fl-help"><b>Note:</b> OCR requires a server that can run <code>python3</code> + <code>tesseract</code>. Untuk override command python: set <code>SIMKU_OCR_PYTHON</code> di wp-config.php.</div>';
-        echo '<div class="fl-help">Status: Script '.($script_ok?'<span class="fl-badge fl-badge-ok">OK</span>':'<span class="fl-badge fl-badge-bad">Not found</span>').' | Python: '.($diag_py?'<span class="fl-badge fl-badge-ok">'.esc_html($diag_py).'</span>':'<span class="fl-badge fl-badge-sub">unknown</span>').'</div>';
-
-        echo '<form method="post" enctype="multipart/form-data" class="fl-form">';
-        wp_nonce_field('fl_scan_receipt');
-        echo '<input type="hidden" name="fl_scan_receipt_submit" value="1" />';
-        echo '<div class="fl-grid fl-grid-2">';
-        echo '<div class="fl-field"><label>Receipt photo</label><input type="file" name="receipt_image" accept="image/*" required /></div>';
-        echo '<div class="fl-field"><label>&nbsp;</label><button class="button button-primary" type="submit">Scan Receipt</button></div>';
-        echo '</div>';
-        echo '</form>';
-        echo '</div>';
-
         if ($scan_error) {
             echo '<div class="notice notice-error"><p>'.esc_html($scan_error).'</p></div>';
         }
 
+        // Layout wrapper (2-column on desktop, stacked on mobile)
+        echo '<div class="simku-scan-layout">';
+
+        echo '<div class="fl-card fl-mt simku-scan-card simku-scan-card-upload">';
+        echo '<h2>Upload & Scan</h2>';
+
+        echo '<form method="post" enctype="multipart/form-data" class="fl-form">';
+        wp_nonce_field('fl_scan_receipt');
+        echo '<input type="hidden" name="fl_scan_receipt_submit" value="1" />';
+        // 3-column layout: info | file | action
+        echo '<div class="simku-scan-upload-grid3">';
+
+        echo '<div class="simku-scan-upload-info">';
+        echo '<div class="fl-help">Upload a receipt photo. The system will run OCR (python) or AI parsing (n8n) and show a preview before saving to Transactions.</div>';
+        if ($use_n8n) {
+            $host = '';
+            $p = wp_parse_url($n8n_url);
+            if (is_array($p)) {
+                $host = (string)($p['host'] ?? '');
+                if (!empty($p['port'])) $host .= ':' . (string)$p['port'];
+            }
+            echo '<div class="fl-help"><b>Mode:</b> <span class="fl-badge fl-badge-ok">n8n</span> (configured)'.($host ? ' — <span class="fl-badge fl-badge-sub">'.esc_html($host).'</span>' : '').'</div>';
+            $settings_url = admin_url('admin.php?page=fl-settings#fl-receipt-scanner');
+            $src = defined('SIMKU_N8N_WEBHOOK_URL') ? 'wp-config.php' : 'Settings';
+            echo '<div class="fl-help">Configure via <a href="'.esc_url($settings_url).'">Settings → Receipt Scanner (n8n)</a> or wp-config.php constants. <span class="fl-muted">(Source: '.esc_html($src).')</span></div>';
+        } else {
+            echo '<div class="fl-help"><b>Mode:</b> <span class="fl-badge fl-badge-sub">python OCR</span> (default)</div>';
+            echo '<div class="fl-help"><b>Note:</b> OCR requires a server that can run <code>python3</code> + <code>tesseract</code>. Untuk override command python: set <code>SIMKU_OCR_PYTHON</code> di wp-config.php.</div>';
+            echo '<div class="fl-help">Status: Script '.($script_ok?'<span class="fl-badge fl-badge-ok">OK</span>':'<span class="fl-badge fl-badge-bad">Not found</span>').' | Python: '.($diag_py?'<span class="fl-badge fl-badge-ok">'.esc_html($diag_py).'</span>':'<span class="fl-badge fl-badge-sub">unknown</span>').'</div>';
+        }
+        echo '<div class="fl-help"><b>Tip:</b> gambar akan dikompres otomatis agar lebih kecil (target &lt; 1.37 MB per gambar).</div>';
+        echo '</div>';
+
+        echo '<div class="simku-scan-upload-file">';
+        echo '<div class="fl-field"><label>Receipt photo</label>';
+        echo '<div class="fl-filepicker">'
+            .'<button type="button" class="button" data-fl-file-trigger="simku_scan_receipt_image">Choose file</button>'
+            .'<span class="fl-file-label fl-file-names">No file chosen</span>'
+            .'<input id="simku_scan_receipt_image" class="fl-hidden-file" type="file" name="receipt_image" accept="image/*" required />'
+            .'<div class="simak-upload-hint"></div>'
+            .'</div>';
+        echo '</div>';
+        echo '</div>';
+
+        echo '<div class="simku-scan-upload-actions"><button class="button button-primary" type="submit">Scan Receipt</button></div>';
+
+        echo '</div>'; // upload grid3
+        echo '</form>';
+        echo '</div>';
+
         if ($uploaded && !empty($uploaded['url'])) {
             $img = esc_url($uploaded['url']);
-            echo '<div class="fl-card fl-mt"><h2>Preview Image</h2><a href="'.$img.'" target="_blank" rel="noopener noreferrer"><img src="'.$img.'" alt="Receipt" style="max-width:420px;width:100%;height:auto;border:1px solid #d0d7de;border-radius:10px;" /></a></div>';
+            echo '<div class="fl-card fl-mt simku-scan-card simku-scan-card-image"><h2>Preview Image</h2><a href="'.$img.'" target="_blank" rel="noopener noreferrer"><img class="simku-scan-preview-img" src="'.$img.'" alt="Receipt" /></a></div>';
         }
 
         if (is_array($scan_result)) {
@@ -4944,7 +5638,7 @@ echo '</div></div>';
             $ts2 = strtotime($default_tanggal_input);
             if ($ts2) $ti_local = wp_date('Y-m-d\\TH:i', $ts2);
 
-            echo '<div class="fl-card fl-mt"><h2>OCR Result (Preview)</h2>';
+            echo '<div class="fl-card fl-mt simku-scan-card simku-scan-card-result"><h2>OCR Result (Preview)</h2>';
             echo '<div class="fl-help">Please review and edit the result. When it looks correct, click <b>Save to Transactions</b>.</div>';
 
             if (!empty($ocr_warnings)) {
@@ -5060,10 +5754,19 @@ echo '</div></div>';
 </script>';
 
             echo '</div>';
+        } else {
+            // Placeholder card in the right column (before any scan result)
+            echo '<div class="fl-card fl-mt simku-scan-card simku-scan-card-result">'
+                .'<h2>OCR Result (Preview)</h2>'
+                .'<div class="fl-help">Upload a receipt photo and click <b>Scan Receipt</b>. The parsed result will appear here for review before saving.</div>'
+                .'</div>';
         }
+
+        echo '</div>'; // simku-scan-layout
 
         echo '</div>'; // wrap
     }
+
 
 
 public function handle_export_report_pdf() : void {
@@ -5073,12 +5776,31 @@ public function handle_export_report_pdf() : void {
         $tab = isset($_POST['report_tab']) ? sanitize_text_field(wp_unslash($_POST['report_tab'])) : 'daily';
         $tab = in_array($tab, ['daily','weekly','monthly'], true) ? $tab : 'daily';
 
+        // For now reports use Entry date as basis (same as existing totals). Can be extended later.
+        $date_basis = 'input';
+
+        // User filter (default: all users). Non-admins are restricted to their own login.
+        $user_login = isset($_POST['report_user']) ? sanitize_text_field(wp_unslash($_POST['report_user'])) : 'all';
+        if ($user_login === '' || $user_login === '0') $user_login = 'all';
+        if (!current_user_can('manage_options')) {
+            $cu = wp_get_current_user();
+            if ($cu && !empty($cu->user_login)) $user_login = $cu->user_login;
+        }
+
         if ($tab === 'daily') {
             $date = isset($_POST['report_date']) ? sanitize_text_field(wp_unslash($_POST['report_date'])) : wp_date('Y-m-d');
             $start = $date . ' 00:00:00';
             $end = wp_date('Y-m-d 00:00:00', strtotime($date . ' +1 day'));
-            $tot = $this->calc_totals_between($start, $end);
-            $this->export_pdf_report("Daily report: {$date}", $tot, ['range' => $date]);
+            $tot = $this->calc_totals_between($start, $end, $date_basis, $user_login);
+
+            $this->export_pdf_report("Daily report: {$date}", $tot, [
+                'report_type'   => 'daily',
+                'range_display' => $date,
+                'start_dt'      => $start,
+                'end_dt'        => $end,
+                'date_basis'    => $date_basis,
+                'user_login'    => $user_login,
+            ]);
             return;
         }
 
@@ -5087,8 +5809,19 @@ public function handle_export_report_pdf() : void {
             $to = isset($_POST['report_to']) ? sanitize_text_field(wp_unslash($_POST['report_to'])) : wp_date('Y-m-d', strtotime('sunday this week'));
             $start = $from . ' 00:00:00';
             $end = wp_date('Y-m-d 00:00:00', strtotime($to . ' +1 day'));
-            $tot = $this->calc_totals_between($start, $end);
-            $this->export_pdf_report("Weekly report: {$from} → {$to}", $tot, ['range' => $from . ' → ' . $to]);
+            $tot = $this->calc_totals_between($start, $end, $date_basis, $user_login);
+
+            $from_disp = wp_date('d/m/Y', strtotime($from));
+            $to_disp   = wp_date('d/m/Y', strtotime($to));
+
+            $this->export_pdf_report("Weekly report", $tot, [
+                'report_type'   => 'weekly',
+                'range_display' => "{$from_disp} - {$to_disp}",
+                'start_dt'      => $start,
+                'end_dt'        => $end,
+                'date_basis'    => $date_basis,
+                'user_login'    => $user_login,
+            ]);
             return;
         }
 
@@ -5096,8 +5829,16 @@ public function handle_export_report_pdf() : void {
         $month = isset($_POST['report_month']) ? sanitize_text_field(wp_unslash($_POST['report_month'])) : wp_date('Y-m');
         $start = $month . '-01 00:00:00';
         $end = wp_date('Y-m-01 00:00:00', strtotime($start . ' +1 month'));
-        $tot = $this->calc_totals_between($start, $end);
-        $this->export_pdf_report("Monthly report: {$month}", $tot, ['range' => $month]);
+        $tot = $this->calc_totals_between($start, $end, $date_basis, $user_login);
+
+        $this->export_pdf_report("Monthly report", $tot, [
+            'report_type'   => 'monthly',
+            'range_display' => $month,
+            'start_dt'      => $start,
+            'end_dt'        => $end,
+            'date_basis'    => $date_basis,
+            'user_login'    => $user_login,
+        ]);
     }
 
 
@@ -5105,12 +5846,15 @@ public function page_reports() : void {
         if (!current_user_can(self::CAP_VIEW_REPORTS)) wp_die('Forbidden');
 
         $tab = isset($_GET['tab']) ? sanitize_text_field(wp_unslash($_GET['tab'])) : 'daily';
+        $user_param = isset($_GET['user']) ? sanitize_text_field(wp_unslash($_GET['user'])) : '';
 
         echo '<div class="wrap fl-wrap">';
         echo $this->page_header_html('Reports', '[simku_reports]', '[simku page="reports"]');
         echo '<h2 class="nav-tab-wrapper">';
         foreach (['daily'=>'Daily','weekly'=>'Weekly (Custom)','monthly'=>'Monthly'] as $k=>$label) {
-            $url = add_query_arg(['page'=>'fl-reports','tab'=>$k], admin_url('admin.php'));
+            $args = ['page'=>'fl-reports','tab'=>$k];
+            if ($user_param !== '' && $user_param !== '0') $args['user'] = $user_param;
+            $url = add_query_arg($args, admin_url('admin.php'));
             echo '<a class="nav-tab '.($tab===$k?'nav-tab-active':'').'" href="'.esc_url($url).'">'.esc_html($label).'</a>';
         }
         echo '</h2>';
@@ -5122,28 +5866,152 @@ public function page_reports() : void {
         echo '</div>';
     }
 
+    /**
+     * Read the reports user filter from GET/POST.
+     * - Admins can choose "All users" or any user_login.
+     * - Non-admins are restricted to their own user_login.
+     */
+    private function reports_get_user_filter(array $src, string $key = 'user') : string {
+        $u = isset($src[$key]) ? sanitize_text_field(wp_unslash($src[$key])) : 'all';
+        if ($u === '' || $u === '0') $u = 'all';
+        if (!current_user_can('manage_options')) {
+            $cu = wp_get_current_user();
+            if ($cu && !empty($cu->user_login)) $u = $cu->user_login;
+        }
+        return $u;
+    }
+
+    private function reports_render_user_dropdown(string $selected) : void {
+        // Non-admins are restricted to their own user only.
+        $args = [
+            'name' => 'user',
+            'value_field' => 'user_login',
+            'echo' => 0,
+        ];
+
+        if (current_user_can('manage_options')) {
+            $args['show_option_all'] = 'All users';
+            // wp_dropdown_users uses value "0" for the "all" option.
+            $args['selected'] = ($selected === 'all') ? '0' : $selected;
+        } else {
+            $args['include'] = [get_current_user_id()];
+            $args['selected'] = $selected;
+        }
+
+        $html = wp_dropdown_users($args);
+
+        // Ensure predictable id/class for styling.
+        if (strpos($html, 'id=') === false) {
+            $html = str_replace("name='user'", "name='user' id='simku_reports_user'", $html);
+            $html = str_replace('name="user"', 'name="user" id="simku_reports_user"', $html);
+        }
+
+        if (strpos($html, 'class=') === false) {
+            $html = preg_replace('/<select([^>]*)>/', '<select$1 class="simku-input">', $html, 1);
+        } else {
+            $html = preg_replace('/<select([^>]*)class="([^"]*)"([^>]*)>/', '<select$1class="$2 simku-input"$3>', $html, 1);
+        }
+
+        echo '<div class="simku-filter-field simku-filter-user">';
+        echo '<label for="simku_reports_user">User</label>';
+        echo $html;
+        echo '</div>';
+    }
+
+    /**
+     * Normalize date input from browser/datepicker into ISO Y-m-d.
+     * Accepts: Y-m-d, m/d/Y, d/m/Y, d-m-Y, m-d-Y, etc.
+     *
+     * Heuristic for dd/mm vs mm/dd:
+     * - if first part > 12 => day/month
+     * - else if second part > 12 => month/day
+     * - else default month/day (matches most browser locale outputs like 01/14/2026)
+     */
+    private function normalize_date_ymd(string $raw): string {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return date('Y-m-d');
+        }
+
+        // Already ISO
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+            return $raw;
+        }
+
+        // Common slash or dash formats: 01/14/2026, 14/01/2026, 14-01-2026, etc.
+        if (preg_match('/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/', $raw, $m)) {
+            $a = (int)$m[1];
+            $b = (int)$m[2];
+            $y = (int)$m[3];
+            if ($a > 12 && $b <= 12) {
+                $d = $a; $mo = $b;
+            } elseif ($b > 12 && $a <= 12) {
+                $mo = $a; $d = $b;
+            } else {
+                // ambiguous (both <= 12) -> default to month/day
+                $mo = $a; $d = $b;
+            }
+            return sprintf('%04d-%02d-%02d', $y, $mo, $d);
+        }
+
+        // Try strtotime fallback
+        $ts = strtotime($raw);
+        if ($ts !== false) {
+            return date('Y-m-d', $ts);
+        }
+
+        // last resort
+        return date('Y-m-d');
+    }
+
+    /** Normalize month input into ISO Y-m (accepts YYYY-MM or MM/YYYY). */
+    private function normalize_month_ym(string $raw): string {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return date('Y-m');
+        }
+        if (preg_match('/^\d{4}-\d{2}$/', $raw)) {
+            return $raw;
+        }
+        if (preg_match('/^(\d{1,2})[\/-](\d{4})$/', $raw, $m)) {
+            $mo = (int)$m[1];
+            $y = (int)$m[2];
+            return sprintf('%04d-%02d', $y, $mo);
+        }
+        $ts = strtotime($raw . '-01');
+        if ($ts !== false) {
+            return date('Y-m', $ts);
+        }
+        return date('Y-m');
+    }
+
+
     private function report_daily() : void {
         $date = isset($_GET['date']) ? sanitize_text_field(wp_unslash($_GET['date'])) : wp_date('Y-m-d');
+        $user_login = $this->reports_get_user_filter($_GET, 'user');
+
         $start = $date . ' 00:00:00';
         $end = wp_date('Y-m-d 00:00:00', strtotime($date . ' +1 day'));
-        $tot = $this->calc_totals_between($start, $end);
+        $tot = $this->calc_totals_between($start, $end, 'input', $user_login);
 
-        echo '<form method="get" class="fl-inline">';
+        echo '<form method="get" class="fl-inline simku-report-filter">';
         echo '<input type="hidden" name="page" value="fl-reports" />';
         echo '<input type="hidden" name="tab" value="daily" />';
-        echo '<input type="date" name="date" value="'.esc_attr($date).'" />';
-        echo '<button class="button">Run</button>';
-	        echo '</form>';
+        echo '<div class="simku-filter-field simku-filter-date"><label for="simku_report_date">Date</label><input id="simku_report_date" type="date" name="date" value="'.esc_attr($date).'" /></div>';
+        $this->reports_render_user_dropdown($user_login);
+        echo '<div class="simku-filter-actions"><button class="button">Run</button></div>';
+        echo '</form>';
 
-	        // Export PDF
-	        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline" style="margin-left:8px;">';
-	        wp_nonce_field('simku_export_report_pdf');
-	        echo '<input type="hidden" name="action" value="simku_export_report_pdf" />';
-		echo '<input type="hidden" name="simku_export_report_pdf" value="1" />';
-	        echo '<input type="hidden" name="report_tab" value="daily" />';
-	        echo '<input type="hidden" name="report_date" value="'.esc_attr($date).'" />';
-	        echo '<button class="button">Export PDF</button>';
-	        echo '</form>';
+        // Export PDF
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline fl-inline-secondary">';
+        wp_nonce_field('simku_export_report_pdf');
+        echo '<input type="hidden" name="action" value="simku_export_report_pdf" />';
+        echo '<input type="hidden" name="simku_export_report_pdf" value="1" />';
+        echo '<input type="hidden" name="report_tab" value="daily" />';
+        echo '<input type="hidden" name="report_date" value="'.esc_attr($date).'" />';
+        echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<button class="button">Export PDF</button>';
+        echo '</form>';
 
         $this->render_report_summary("Daily report: {$date}", $tot);
     }
@@ -5151,62 +6019,63 @@ public function page_reports() : void {
     private function report_weekly_custom() : void {
         $from = isset($_GET['from']) ? sanitize_text_field(wp_unslash($_GET['from'])) : wp_date('Y-m-d', strtotime('monday this week'));
         $to = isset($_GET['to']) ? sanitize_text_field(wp_unslash($_GET['to'])) : wp_date('Y-m-d', strtotime('sunday this week'));
-	        $group = isset($_GET['group']) ? sanitize_text_field(wp_unslash($_GET['group'])) : 'daily';
-	        $group = in_array($group, ['daily','weekly','monthly'], true) ? $group : 'daily';
+        $user_login = $this->reports_get_user_filter($_GET, 'user');
+
         // inclusive end date -> end dt +1 day
         $start = $from . ' 00:00:00';
         $end = wp_date('Y-m-d 00:00:00', strtotime($to . ' +1 day'));
-        $tot = $this->calc_totals_between($start, $end);
+        $tot = $this->calc_totals_between($start, $end, 'input', $user_login);
 
-        echo '<form method="get" class="fl-inline">';
+        echo '<form method="get" class="fl-inline simku-report-filter">';
         echo '<input type="hidden" name="page" value="fl-reports" />';
         echo '<input type="hidden" name="tab" value="weekly" />';
-        echo '<label>From <input type="date" name="from" value="'.esc_attr($from).'" /></label> ';
-        echo '<label>To <input type="date" name="to" value="'.esc_attr($to).'" /></label> ';
-        echo '<label>Group <select name="group">'
-            .'<option value="daily"'.selected($group,'daily',false).'>Daily</option>'
-            .'<option value="weekly"'.selected($group,'weekly',false).'>Weekly</option>'
-            .'<option value="monthly"'.selected($group,'monthly',false).'>Monthly</option>'
-            .'</select></label> ';
-        echo '<button class="button">Run</button>';
-	        echo '</form>';
+        echo '<div class="simku-filter-field simku-filter-from"><label for="simku_report_from">From</label><input id="simku_report_from" type="date" name="from" value="'.esc_attr($from).'" /></div>';
+        echo '<div class="simku-filter-field simku-filter-to"><label for="simku_report_to">To</label><input id="simku_report_to" type="date" name="to" value="'.esc_attr($to).'" /></div>';
+        $this->reports_render_user_dropdown($user_login);
+        echo '<div class="simku-filter-actions"><button class="button">Run</button></div>';
+        echo '</form>';
 
-	        // Export PDF
-	        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline" style="margin-left:8px;">';
-	        wp_nonce_field('simku_export_report_pdf');
-	        echo '<input type="hidden" name="action" value="simku_export_report_pdf" />';
-		echo '<input type="hidden" name="simku_export_report_pdf" value="1" />';
-	        echo '<input type="hidden" name="report_tab" value="weekly" />';
-	        echo '<input type="hidden" name="report_from" value="'.esc_attr($from).'" />';
-	        echo '<input type="hidden" name="report_to" value="'.esc_attr($to).'" />';
-	        echo '<button class="button">Export PDF</button>';
-	        echo '</form>';
+        // Export PDF
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline fl-inline-secondary">';
+        wp_nonce_field('simku_export_report_pdf');
+        echo '<input type="hidden" name="action" value="simku_export_report_pdf" />';
+        echo '<input type="hidden" name="simku_export_report_pdf" value="1" />';
+        echo '<input type="hidden" name="report_tab" value="weekly" />';
+        echo '<input type="hidden" name="report_from" value="'.esc_attr($from).'" />';
+        echo '<input type="hidden" name="report_to" value="'.esc_attr($to).'" />';
+        echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<button class="button">Export PDF</button>';
+        echo '</form>';
 
         $this->render_report_summary("Weekly report: {$from} → {$to}", $tot);
     }
 
     private function report_monthly() : void {
         $month = isset($_GET['month']) ? sanitize_text_field(wp_unslash($_GET['month'])) : wp_date('Y-m');
+        $user_login = $this->reports_get_user_filter($_GET, 'user');
+
         $start = $month . '-01 00:00:00';
         $end = wp_date('Y-m-01 00:00:00', strtotime($start . ' +1 month'));
-        $tot = $this->calc_totals_between($start, $end);
+        $tot = $this->calc_totals_between($start, $end, 'input', $user_login);
 
-        echo '<form method="get" class="fl-inline">';
+        echo '<form method="get" class="fl-inline simku-report-filter">';
         echo '<input type="hidden" name="page" value="fl-reports" />';
         echo '<input type="hidden" name="tab" value="monthly" />';
-        echo '<input type="month" name="month" value="'.esc_attr($month).'" />';
-        echo '<button class="button">Run</button>';
-	        echo '</form>';
+        echo '<div class="simku-filter-field simku-filter-month"><label for="simku_report_month">Month</label><input id="simku_report_month" type="month" name="month" value="'.esc_attr($month).'" /></div>';
+        $this->reports_render_user_dropdown($user_login);
+        echo '<div class="simku-filter-actions"><button class="button">Run</button></div>';
+        echo '</form>';
 
-	        // Export PDF
-	        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline" style="margin-left:8px;">';
-	        wp_nonce_field('simku_export_report_pdf');
-	        echo '<input type="hidden" name="action" value="simku_export_report_pdf" />';
-		echo '<input type="hidden" name="simku_export_report_pdf" value="1" />';
-	        echo '<input type="hidden" name="report_tab" value="monthly" />';
-	        echo '<input type="hidden" name="report_month" value="'.esc_attr($month).'" />';
-	        echo '<button class="button">Export PDF</button>';
-	        echo '</form>';
+        // Export PDF
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline fl-inline-secondary">';
+        wp_nonce_field('simku_export_report_pdf');
+        echo '<input type="hidden" name="action" value="simku_export_report_pdf" />';
+        echo '<input type="hidden" name="simku_export_report_pdf" value="1" />';
+        echo '<input type="hidden" name="report_tab" value="monthly" />';
+        echo '<input type="hidden" name="report_month" value="'.esc_attr($month).'" />';
+        echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<button class="button">Export PDF</button>';
+        echo '</form>';
 
         $this->render_report_summary("Monthly report: {$month}", $tot);
     }
@@ -5240,6 +6109,8 @@ public function page_reports() : void {
         $offset = ($page-1)*$per;
 
         $total = (int)$wpdb->get_var("SELECT COUNT(*) FROM {$table}");
+        $total_pages = max(1, (int)ceil($total / $per));
+        $pagination_html = $this->render_pagination('fl-logs', $page, $total_pages, []);
         $rows = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$table} ORDER BY created_at DESC LIMIT %d OFFSET %d", $per, $offset), ARRAY_A);
 
         echo '<div class="wrap fl-wrap">';
@@ -5276,16 +6147,7 @@ public function page_reports() : void {
             echo '</tr>';
         }
         echo '</tbody></table></div>';
-
-        $total_pages = (int)ceil($total/$per);
-        if ($total_pages > 1) {
-            echo '<div class="tablenav"><div class="tablenav-pages">';
-            for ($p=1;$p<=$total_pages;$p++) {
-                $u = add_query_arg(['page'=>'fl-logs','paged'=>$p], admin_url('admin.php'));
-                echo $p===$page ? '<span class="page-numbers current">'.esc_html($p).'</span>' : '<a class="page-numbers" href="'.esc_url($u).'">'.esc_html($p).'</a>';
-            }
-            echo '</div></div>';
-        }
+        echo $pagination_html;
 
         echo '</div>';
     }
@@ -5346,6 +6208,22 @@ public function page_reports() : void {
             $base['notify']['reminder_telegram_tpl'] = (string) wp_unslash($_POST['reminder_telegram_tpl'] ?? ($base['notify']['reminder_telegram_tpl'] ?? ''));
             $base['notify']['reminder_email_subject_tpl'] = sanitize_text_field(wp_unslash($_POST['reminder_email_subject_tpl'] ?? ($base['notify']['reminder_email_subject_tpl'] ?? '')));
             $base['notify']['reminder_email_body_tpl'] = (string) wp_unslash($_POST['reminder_email_body_tpl'] ?? ($base['notify']['reminder_email_body_tpl'] ?? ''));
+
+            // Receipt scanner (n8n)
+            if (!is_array($base['n8n'] ?? null)) $base['n8n'] = self::default_settings()['n8n'];
+            $base['n8n']['webhook_url'] = esc_url_raw(wp_unslash($_POST['n8n_webhook_url'] ?? ($base['n8n']['webhook_url'] ?? '')));
+            $base['n8n']['timeout'] = (int)($_POST['n8n_timeout'] ?? ($base['n8n']['timeout'] ?? 90));
+            if ($base['n8n']['timeout'] < 10) $base['n8n']['timeout'] = 10;
+            if ($base['n8n']['timeout'] > 180) $base['n8n']['timeout'] = 180;
+
+            if (!empty($_POST['n8n_clear_api_key'])) {
+                $base['n8n']['api_key'] = '';
+            } else {
+                $new_key = (string) wp_unslash($_POST['n8n_api_key'] ?? '');
+                if ($new_key !== '') {
+                    $base['n8n']['api_key'] = sanitize_text_field($new_key);
+                }
+            }
 
             return $base;
         };
@@ -5569,6 +6447,24 @@ public function page_reports() : void {
             echo '<label><input type="checkbox" name="expense_categories[]" value="'.esc_attr($cat).'" '.checked($checked,true,false).' /> '.esc_html($cat).'</label> ';
         }
         echo '</div></div>';
+        echo '</div>';
+
+        // Receipt Scanner (n8n)
+        $has_n8n_key = !empty($s['n8n']['api_key']);
+        $n8n_key_badge = $has_n8n_key ? '<span class="fl-badge fl-badge-ok">Saved</span>' : '<span class="fl-badge fl-badge-sub">Not set</span>';
+        echo '<div id="fl-receipt-scanner" class="fl-card"><h2>Receipt Scanner (n8n)</h2>';
+        echo '<div class="fl-help">Optional: use an n8n webhook (AI) to parse receipt images. If Webhook URL is set, Scan Receipt will use n8n instead of python OCR.</div>';
+        echo '<div class="fl-grid fl-grid-2">';
+        echo '<div class="fl-field fl-full"><label>Webhook URL</label><input name="n8n_webhook_url" value="'.esc_attr($s['n8n']['webhook_url'] ?? '').'" placeholder="https://.../webhook/simku-scan-receipt" />';
+        echo '<div class="fl-help">Expected response: valid JSON. Mode should return preview data.</div>';
+        echo '</div>';
+        echo '<div class="fl-field"><label>Timeout (seconds)</label><input type="number" min="10" max="180" name="n8n_timeout" value="'.esc_attr((int)($s['n8n']['timeout'] ?? 90)).'" /></div>';
+        echo '<div class="fl-field"><label>API Key (optional)</label><input type="password" name="n8n_api_key" value="" placeholder="Leave blank to keep existing" />';
+        echo '<div class="fl-help">Sent as header <code>X-API-Key</code>. ' . $n8n_key_badge . '</div>';
+        echo '</div>';
+        echo '<div class="fl-field fl-check"><label><input type="checkbox" name="n8n_clear_api_key" value="1" /> Clear saved API key</label></div>';
+        echo '</div>';
+        echo '<div class="fl-help">Advanced: you can also define <code>SIMKU_N8N_WEBHOOK_URL</code> / <code>SIMKU_N8N_API_KEY</code> / <code>SIMKU_N8N_TIMEOUT</code> in wp-config.php (will override these settings).</div>';
         echo '</div>';
 
         echo '<div class="fl-card"><h2>Notifications</h2>';
@@ -6096,6 +6992,39 @@ public function page_reports() : void {
             $actions .= '</div></div>';
         }
         return '<div class="fl-page-head"><h1>' . esc_html($title) . '</h1>' . $actions . '</div>';
+    }
+
+    /**
+     * Pagination UI used across SIMKU list pages.
+     * Keeps pagination usable on desktop/mobile (bigger click targets + centered).
+     */
+    private function render_pagination(string $page_slug, int $current, int $total_pages, array $query_args = []) : string {
+        if ($total_pages <= 1) return '';
+
+        // Remove any existing 'paged' from args; paginate_links() will inject it.
+        if (isset($query_args['paged'])) unset($query_args['paged']);
+
+        // Keep only non-empty args.
+        $query_args = array_filter($query_args, function($v){
+            return !($v === '' || $v === null);
+        });
+
+        $base = add_query_arg(array_merge(['page' => $page_slug, 'paged' => '%#%'], $query_args), admin_url('admin.php'));
+        $links = paginate_links([
+            'base'      => $base,
+            'format'    => '',
+            'current'   => max(1, $current),
+            'total'     => max(1, $total_pages),
+            'mid_size'  => 1,
+            'end_size'  => 1,
+            'prev_text' => '‹',
+            'next_text' => '›',
+            'type'      => 'array',
+        ]);
+
+        if (empty($links) || !is_array($links)) return '';
+
+        return '<div class="tablenav fl-pagination"><div class="tablenav-pages">' . implode('', $links) . '</div></div>';
     }
 
 

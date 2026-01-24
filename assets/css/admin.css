@@ -179,7 +179,79 @@ body.simku_page_fl-add-payment-reminder{
 @media (max-width: 1100px){.fl-builder-shell{grid-template-columns:1fr;}}
 
 /* Helpers */
-.fl-inline{ display:flex; gap:8px; align-items:center; margin:12px 0; }
+.fl-inline{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
+
+
+/* Reports filter (Daily/Weekly/Monthly) */
+.simku-filter-field{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.simku-filter-field label{ font-size:12px; font-weight:600; color:var(--simku-muted); margin:0; }
+
+.simku-report-filter{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:flex-end;
+}
+.simku-report-filter .simku-filter-field input,
+.simku-report-filter .simku-filter-field select{
+  height:36px;
+  min-height:36px;
+}
+
+/* Desktop sizing (prevents the first date field from stretching too wide) */
+.simku-report-filter .simku-filter-date,
+.simku-report-filter .simku-filter-from,
+.simku-report-filter .simku-filter-to,
+.simku-report-filter .simku-filter-month{
+  flex:0 0 170px;
+  min-width:170px;
+}
+.simku-report-filter .simku-filter-user{
+  flex:0 0 200px;
+  min-width:200px;
+}
+
+.simku-report-filter .simku-filter-actions{ flex:0 0 auto; }
+.simku-report-filter .simku-filter-actions .button{
+  height:36px;
+  min-height:36px;
+  padding:0 14px;
+}
+
+
+/* Dashboard Charts filter */
+.simku-dashboard-filter-card{ margin-top:18px; margin-bottom:12px; }
+.simku-dashboard-filter .simku-filter-group,
+.simku-dashboard-filter .simku-filter-basis{
+  flex:0 0 160px;
+  min-width:160px;
+}
+
+/* Secondary inline form spacing (Export PDF) */
+.fl-inline-secondary{ margin-left:8px; }
+
+/* Mobile: always stack neatly (even when browser is set to “Desktop site”) */
+@media (max-width: 782px), (max-device-width: 782px), (hover: none) and (pointer: coarse){
+  .simku-report-filter{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+    align-items:stretch;
+  }
+  .simku-report-filter .simku-filter-date,
+  .simku-report-filter .simku-filter-from,
+  .simku-report-filter .simku-filter-to,
+  .simku-report-filter .simku-filter-month,
+  .simku-report-filter .simku-filter-user{
+    min-width:0;
+    width:100%;
+  }
+  .simku-report-filter .simku-filter-actions .button{
+    width:100%;
+    justify-content:center;
+  }
+  .fl-inline-secondary{ margin-left:0; }
+}
 .fl-template{ font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
 .fl-full{ grid-column:1 / -1; }
 .fl-mini{ padding:12px; border-radius:12px; background:#fafafa; border:1px solid #eee; }
@@ -264,6 +336,166 @@ body.simku_page_fl-add-payment-reminder{
   gap: 8px;
   align-items: flex-end;
 }
+
+/* Transactions filters: compact */
+.simku-tx-filters{ margin-bottom:12px; }
+
+/* Transactions table: add breathing room */
+body.simku_page_fl-transactions table.widefat th,
+body.simku_page_fl-transactions table.widefat td{
+  padding-top:10px;
+  padding-bottom:10px;
+  line-height:1.35;
+}
+
+.simku-tx-filters .fl-filters-grid{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:flex-end;
+}
+.simku-tx-filters .fl-field{
+  margin-bottom:0;
+}
+.simku-tx-filters .fl-field-search{
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+.simku-tx-filters .fl-field-category{
+  flex: 1 1 220px;
+  max-width: 300px;
+}
+.simku-tx-filters .fl-field-user{
+  flex: 1 1 200px;
+  max-width: 260px;
+}
+.simku-tx-filters .fl-field-from,
+.simku-tx-filters .fl-field-to{
+  flex: 0 1 180px;
+  max-width: 210px;
+}
+.simku-tx-filters .fl-filter-actions{
+  flex: 0 0 auto;
+}
+
+@media (max-width: 782px){
+  .simku-tx-filters .fl-filters-grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:10px;
+    align-items:end;
+  }
+  .simku-tx-filters .fl-filter-actions{
+    grid-column: 1 / -1;
+  }
+  .simku-tx-filters .fl-filter-actions .button{
+    width:100%;
+    justify-content:center;
+  }
+}
+
+/* Add Transaction spacing */
+.simku-addtx-form{
+  margin-top:12px;
+}
+
+
+/* -------------------------------------------------------------------------
+   Scan Receipt page layout polish
+---------------------------------------------------------------------------*/
+body.simku_page_fl-scan-struk .simku-scan-layout{
+  display:grid;
+  /* Left column = controls + preview, Right column = OCR result */
+  grid-template-columns: minmax(320px, 440px) 1fr;
+  gap:14px;
+  align-items:start;
+  grid-template-areas:
+    "upload result"
+    "image  result";
+}
+body.simku_page_fl-scan-struk .simku-scan-card{ margin-top:0 !important; }
+body.simku_page_fl-scan-struk .simku-scan-card-upload{ grid-area: upload; }
+body.simku_page_fl-scan-struk .simku-scan-card-image{ grid-area: image; }
+body.simku_page_fl-scan-struk .simku-scan-card-result{ grid-area: result; }
+
+body.simku_page_fl-scan-struk .simku-scan-upload-grid3{
+  display:grid;
+  /* Stack info + file + action vertically (matches desired UI) */
+  grid-template-columns: 1fr;
+  gap:12px;
+  align-items:stretch;
+}
+
+body.simku_page_fl-scan-struk .simku-scan-upload-info{
+  border:1px solid var(--simku-border);
+  background:#f6f7f7;
+  border-radius:12px;
+  padding:10px 12px;
+}
+body.simku_page_fl-scan-struk .simku-scan-upload-info .fl-help{
+  margin:0 0 8px;
+}
+body.simku_page_fl-scan-struk .simku-scan-upload-info .fl-help:last-child{ margin-bottom:0; }
+
+body.simku_page_fl-scan-struk .simku-scan-upload-file{
+  border:1px solid var(--simku-border);
+  background:#fff;
+  border-radius:12px;
+  padding:10px 12px;
+}
+body.simku_page_fl-scan-struk .simku-scan-upload-file .fl-field{ margin:0; }
+body.simku_page_fl-scan-struk .simku-scan-upload-file .fl-filepicker{ flex-wrap:wrap; }
+body.simku_page_fl-scan-struk .simku-scan-upload-file .fl-file-names{
+  flex:1 1 auto;
+  min-width:0;
+  word-break:break-word;
+}
+body.simku_page_fl-scan-struk .simku-scan-upload-file .simak-upload-hint{
+  width:100%;
+  margin-top:6px;
+  color:#646970;
+  font-size:12px;
+}
+
+body.simku_page_fl-scan-struk .simku-scan-upload-actions{
+  display:block;
+}
+body.simku_page_fl-scan-struk .simku-scan-upload-actions .button-primary{
+  width:100%;
+  height:40px;
+  min-height:40px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+
+body.simku_page_fl-scan-struk .simku-scan-preview-img{
+  width:100%;
+  height:auto;
+  display:block;
+  border:1px solid var(--simku-border);
+  border-radius:12px;
+}
+
+body.simku_page_fl-scan-struk .simak-line-item-row input[type=number]{
+  text-align:right;
+}
+
+@media (max-width: 1100px){
+  body.simku_page_fl-scan-struk .simku-scan-layout{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "upload"
+      "image"
+      "result";
+  }
+  body.simku_page_fl-scan-struk .simku-scan-upload-grid3{ grid-template-columns:1fr; }
+}
+
+@media (max-width: 782px){
+  body.simku_page_fl-scan-struk .simku-scan-upload-grid3{ grid-template-columns:1fr; }
+}
+
 
 /* Line-items (Add Transaction & Scan Receipt) */
 .simak-line-items {
@@ -413,3 +645,60 @@ body.simku_page_fl-add-payment-reminder{
   background:#fff;
   font-size:12px;
 }
+
+/* -------------------------------------------------------------------------
+   Pagination UI (bigger + centered + touch-friendly)
+---------------------------------------------------------------------------*/
+.fl-wrap .tablenav{
+  margin:12px 0 6px;
+}
+
+.fl-wrap .tablenav .tablenav-pages{
+  float:none;
+  width:100%;
+  text-align:center;
+  margin:0;
+}
+
+.fl-wrap .tablenav .tablenav-pages .page-numbers,
+.fl-wrap .tablenav .tablenav-pages .tablenav-pages-navspan,
+.fl-wrap .tablenav .tablenav-pages a.button,
+.fl-wrap .tablenav .tablenav-pages span.button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:38px;
+  height:38px;
+  padding:0 12px;
+  margin:0 4px 6px;
+  border:1px solid #c3c4c7;
+  border-radius:8px;
+  background:#fff;
+  font-size:14px;
+  line-height:1;
+  text-decoration:none;
+  box-sizing:border-box;
+}
+
+.fl-wrap .tablenav .tablenav-pages .page-numbers.current{
+  background:#2271b1;
+  border-color:#2271b1;
+  color:#fff;
+}
+
+.fl-wrap .tablenav .tablenav-pages .page-numbers:hover{
+  background:#f6f7f7;
+}
+
+@media (max-width: 782px){
+  .fl-wrap .tablenav .tablenav-pages .page-numbers,
+  .fl-wrap .tablenav .tablenav-pages .tablenav-pages-navspan,
+  .fl-wrap .tablenav .tablenav-pages a.button,
+  .fl-wrap .tablenav .tablenav-pages span.button{
+    min-width:44px;
+    height:44px;
+    font-size:15px;
+  }
+}
+
+
