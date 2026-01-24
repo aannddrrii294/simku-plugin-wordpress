@@ -1,88 +1,75 @@
+# SIMKU (Finance Manager) — WordPress Plugin
+
+SIMKU is a WordPress plugin for simple financial management: track **income/expenses**, manage **savings**, set **payment reminders**, view **dashboards & charts (ECharts)**, generate **reports (PDF export)**, and configure **spending limits & notifications**.  
+It supports both **WordPress internal tables** and an **external MySQL/MariaDB database**.
+
+**Version:** 0.5.89.3  
+**License:** GPL-2.0-or-later
 
 ---
 
-## README — `SIMKU Keuangan` (updated for v0.5.89.3)
-
-```md
-# SIMKU Keuangan (WordPress Plugin)
-
-**SIMKU Keuangan** is a WordPress plugin for lightweight financial management:
-track **income/expenses**, manage **savings**, schedule **payment reminders**, and visualize insights with **charts** and **reports**.
-
-This plugin supports:
-- **Internal storage** (WordPress database tables), or
-- **External MySQL storage** (connect to a separate database/table)
-
-It also includes optional receipt scanning via:
-- **n8n webhook (AI parsing)**, or
-- **local Python OCR** (requires server support and an OCR script)
-
----
-
-## Key Features
+## Features
 
 ### Transactions
-- Track income/expense/saving/invest entries
-- Multi-item transaction flow: each item is stored as a separate row, grouped by `transaction_id`
-- Attach **multiple images** (stored in `gambar_url`)
-- Bulk import transactions from **CSV**
-- Export transaction list to **PDF**
+- Record income/expense transactions (multi-item supported via `transaction_id`)
+- Upload **multiple images** per transaction (images are automatically compressed to reduce size)
+- Edit/update existing entries from WP Admin
 
-### Savings
-- Record savings/investments per account
-- Separate datasource mode (same/internal/external)
+### Savings / Investments
+- Record savings entries (and optionally keep them in separate tables/datasource)
+- Simple listing and management from WP Admin
 
-### Payment Reminders (Installments/Billing)
-- Create reminders with due dates and installment tracking
-- Optional scheduled reminders (hourly cron)
-- Bulk import reminders from **CSV**
+### Payment Reminders
+- Create installment/bill reminders with due dates and status
+- Upload proof images (multiple files supported)
+- **Bulk import reminders from CSV** (Admin → Add Reminder → Bulk CSV)
 
-### Charts (ECharts)
-- Chart builder (no-code) with metrics, filters, ranges
-- Optional SQL-based chart mode (advanced)
-- Charts are available for all logged-in users
-- “Public chart templates” exist, but data remains scoped per user when user columns are available
-
-### Reports
-- Built-in report views
-- Export reports to **PDF**
+### Dashboards, Charts & Reports
+- Dashboards and charts using **Apache ECharts**
+- Charts menu is accessible for all logged-in users (capability: `read`)
+- Export **reports to PDF** (daily / weekly / monthly)
 
 ### Spending Limits & Notifications
-- Daily/Weekly/Monthly limit checks via cron
-- Notifications:
-  - Telegram bot
+- Daily / weekly / monthly expense limit checks (runs on cron)
+- Notifications via:
+  - Telegram
   - Email
-  - Optional WhatsApp webhook (generic JSON POST)
+  - WhatsApp webhook (HTTP POST)
 
-### Audit Logs
-- Logs important actions (create/update/delete), notifications, login/logout, etc.
+### Flexible Datasource
+- **Internal**: uses WP database tables (auto-created on activation)
+- **External**: connect to another MySQL/MariaDB database + table
+- Optional “Allow write to external” mode (otherwise external datasource can be read-only)
 
-### Frontend Embedding (Shortcodes)
-All major pages can be embedded on frontend pages via shortcodes (login required).
+### Receipt Scanning (Optional)
+- Prefer **n8n webhook** (AI parsing) if configured
+- Fallback to **local Python OCR** (requires server support + OCR script)
 
 ---
 
 ## Requirements
 
-- WordPress **5.3+** (uses modern date/time helpers)
-- PHP **7.0+**
-- MySQL/MariaDB (internal WP DB or external DB)
-- Outbound HTTP access for:
-  - ECharts CDN (loaded from `https://cdn.jsdelivr.net/...`)
-  - Telegram API (if enabled)
-  - n8n webhook (if enabled)
+- WordPress admin access
+- PHP 7.0+ (typical WordPress hosting)
+- MySQL/MariaDB
+- WP-Cron enabled (recommended) for reminders/limit checks
+
+Optional:
+- Telegram bot token & chat ID (for Telegram notifications)
+- A webhook endpoint (for WhatsApp integration)
+- n8n webhook (for AI receipt scan)
+- Python3 + `proc_open()` enabled (for local OCR fallback)
 
 ---
 
 ## Installation
 
-### Option A — Install from WordPress Admin
+### Option A — WordPress Admin
 1. Go to **Plugins → Add New → Upload Plugin**
-2. Upload the plugin ZIP
-3. Activate **SIMKU Keuangan**
+2. Upload the SIMKU ZIP
+3. Activate **SIMKU (Finance Manager)**
 
-### Option B — Manual install
-1. Extract the plugin folder to:
-
-```bash
-wp-content/plugins/simku-keuangan/
+### Option B — Manual
+1. Extract the plugin to:
+   ```bash
+   wp-content/plugins/simku-keuangan/
