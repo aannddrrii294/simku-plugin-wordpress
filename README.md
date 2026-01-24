@@ -1,148 +1,88 @@
-# SIMKU (Finance Manager) — WordPress Plugin
-
-SIMKU is a WordPress plugin for personal/team financial tracking. It helps you record income/expenses, manage savings/investments, visualize dashboards with charts (Apache ECharts), generate reports, and set spending limits with automated notifications. It also supports using an **external MySQL/MariaDB database** as the data source.
-
-**Version:** 0.5.69  
-**License:** GPLv2 or later
 
 ---
 
-## Features
+## README — `SIMKU Keuangan` (updated for v0.5.89.3)
 
-- **Transactions**
-  - Track income/expenses (supports legacy `outcome` category mapping)
-  - Add/edit entries via WordPress admin pages
-  - Attach receipt images (upload or URL)
-  - Optional notifications on new transactions (Telegram / Email / WhatsApp webhook)
+```md
+# SIMKU Keuangan (WordPress Plugin)
 
-- **Savings / Investments**
-  - Record savings entries and view them in one place
-  - Can share the same datasource as transactions or use separate tables
+**SIMKU Keuangan** is a WordPress plugin for lightweight financial management:
+track **income/expenses**, manage **savings**, schedule **payment reminders**, and visualize insights with **charts** and **reports**.
 
-- **Payment Reminders**
-  - Track installments/bills with due dates
-  - Automated reminder notifications (defaults: D-7, D-5, D-3)
+This plugin supports:
+- **Internal storage** (WordPress database tables), or
+- **External MySQL storage** (connect to a separate database/table)
 
-- **Dashboards & Charts**
-  - Built-in chart templates powered by **ECharts**
-  - “Charts” can be accessible to all logged-in users (read-only templates, user-scoped data)
+It also includes optional receipt scanning via:
+- **n8n webhook (AI parsing)**, or
+- **local Python OCR** (requires server support and an OCR script)
 
-- **Spending Limits & Alerts**
-  - Daily / weekly / monthly expense thresholds
-  - Hourly cron checks and notifications when limits are exceeded
+---
 
-- **Flexible Datasource**
-  - Use WordPress internal tables (auto-created on activation), or
-  - Connect to an **external MySQL/MariaDB** database/table (read-only by default; can enable write)
+## Key Features
+
+### Transactions
+- Track income/expense/saving/invest entries
+- Multi-item transaction flow: each item is stored as a separate row, grouped by `transaction_id`
+- Attach **multiple images** (stored in `gambar_url`)
+- Bulk import transactions from **CSV**
+- Export transaction list to **PDF**
+
+### Savings
+- Record savings/investments per account
+- Separate datasource mode (same/internal/external)
+
+### Payment Reminders (Installments/Billing)
+- Create reminders with due dates and installment tracking
+- Optional scheduled reminders (hourly cron)
+- Bulk import reminders from **CSV**
+
+### Charts (ECharts)
+- Chart builder (no-code) with metrics, filters, ranges
+- Optional SQL-based chart mode (advanced)
+- Charts are available for all logged-in users
+- “Public chart templates” exist, but data remains scoped per user when user columns are available
+
+### Reports
+- Built-in report views
+- Export reports to **PDF**
+
+### Spending Limits & Notifications
+- Daily/Weekly/Monthly limit checks via cron
+- Notifications:
+  - Telegram bot
+  - Email
+  - Optional WhatsApp webhook (generic JSON POST)
+
+### Audit Logs
+- Logs important actions (create/update/delete), notifications, login/logout, etc.
+
+### Frontend Embedding (Shortcodes)
+All major pages can be embedded on frontend pages via shortcodes (login required).
 
 ---
 
 ## Requirements
 
-- WordPress (admin access for setup)
-- PHP (typical WordPress hosting environment)
-- MySQL/MariaDB
-- Cron must be working (WP-Cron or real cron hitting wp-cron.php) for limits/reminder notifications
-
-### Optional (Receipt OCR)
-- `python3` available on the server
-- `proc_open()` enabled (some shared hostings disable it)
-- OCR script file: `ocr/receipt_ocr.py` (not included in this ZIP)
+- WordPress **5.3+** (uses modern date/time helpers)
+- PHP **7.0+**
+- MySQL/MariaDB (internal WP DB or external DB)
+- Outbound HTTP access for:
+  - ECharts CDN (loaded from `https://cdn.jsdelivr.net/...`)
+  - Telegram API (if enabled)
+  - n8n webhook (if enabled)
 
 ---
 
 ## Installation
 
-1. Copy the plugin folder into your WordPress plugins directory:
-   - `wp-content/plugins/simku-keuangan/`
-2. Ensure the main file exists:
-   - `wp-content/plugins/simku-keuangan/simku-keuangan.php`
-3. Activate the plugin from **WP Admin → Plugins**.
+### Option A — Install from WordPress Admin
+1. Go to **Plugins → Add New → Upload Plugin**
+2. Upload the plugin ZIP
+3. Activate **SIMKU Keuangan**
 
-On activation, the plugin will:
-- Create internal tables (if using internal datasource)
-- Register cron schedules (hourly checks)
-- Add a **Finance Manager** role and capabilities (and grant capabilities to Administrators)
+### Option B — Manual install
+1. Extract the plugin folder to:
 
----
-
-## Roles & Permissions
-
-The plugin adds a role: **Finance Manager** with permissions to access core finance features.
-
-Capabilities used:
-- `simak_view_transactions`
-- `simak_manage_transactions`
-- `simak_view_reports`
-- `simak_manage_settings`
-- `simak_view_logs`
-
-Administrators automatically receive these capabilities on activation.
-
----
-
-## Admin Menu
-
-After activation, you’ll see a top-level menu: **SIMKU**.
-
-Submenus include:
-- Dashboard
-- Transactions / Add Transaction / Scan Receipt
-- Savings / Add Saving
-- Reminders / Add Reminder
-- Reports
-- Charts / Add Chart
-- Logs
-- Settings
-
-> By design, **Charts** can be accessible to *any logged-in user* (“read”), while other pages are restricted by capabilities above.
-
----
-
-## Configuration (Settings)
-
-Go to: **SIMKU → Settings**
-
-Key configuration areas:
-
-### 1) Datasource Mode
-- **Internal**: Use WordPress DB tables (created automatically).
-- **External**: Connect to another MySQL/MariaDB database + table.
-
-External connection fields:
-- Host
-- Database name
-- Username
-- Password
-- Table name (default: `finance_transactions`)
-- **Allow write to external** (disabled by default)
-
-> If external mode is used without write permission, SIMKU behaves as read-only for that datasource.
-
-### 2) Savings & Reminders Datasource
-Each can be set to:
-- `same` (follow Transactions datasource)
-- `internal` (force WP internal tables)
-- `external` (use external DB with a separate table name)
-
-Defaults:
-- Savings external table: `finance_savings`
-- Reminders external table: `finance_payment_reminders`
-
-### 3) Notifications
-Supported channels:
-- **Telegram** (bot token + chat ID)
-- **Email** (recipient + enable toggle)
-- **WhatsApp** via **webhook URL** (plugin posts JSON payload)
-
-You can also customize message templates using placeholders (e.g. `{user}`, `{item}`, `{total}`, etc.).
-
----
-
-## Shortcodes (Frontend)
-
-You can embed SIMKU pages into WordPress pages/posts using shortcodes:
-
-### Main router shortcode
-```txt
-[simku page="dashboard"]
+```bash
+wp-content/plugins/simku-keuangan/
