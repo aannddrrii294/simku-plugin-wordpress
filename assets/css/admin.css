@@ -156,6 +156,27 @@ body.simku_page_fl-add-payment-reminder{
 .fl-actions-col{ white-space:nowrap; }
 .fl-cell-wrap{ max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+
+
+/* Transactions list: tidy action buttons + description view */
+.simku-actions{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  align-items:flex-start;
+  white-space:nowrap;
+}
+.simku-actions .button{
+  width:fit-content;
+}
+.simku-desc-box{
+  max-width: 980px;
+  background:#fff;
+  border:1px solid var(--simku-border);
+  border-radius:12px;
+  padding:14px;
+  box-shadow:var(--simku-shadow);
+}
 /* KPI cards (used in Dashboard / Overview) */
 .fl-kpi{
   background:#fff;

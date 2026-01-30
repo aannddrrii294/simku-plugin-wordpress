@@ -3,7 +3,7 @@
 SIMKU is a WordPress plugin for simple financial management: track **income/expenses**, manage **savings**, set **payment reminders**, view **dashboards & charts (ECharts)**, generate **reports (PDF export)**, and configure **spending limits & notifications**.  
 It supports both **WordPress internal tables** and an **external MySQL/MariaDB database**.
 
-**Version:** 0.5.89.3  
+**Version:** 0.5.89.6  
 **License:** GPL-2.0-or-later
 
 ---

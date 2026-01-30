@@ -2,7 +2,7 @@
 /**
  * Plugin Name: SIMKU (Finance Manager)
  * Description: Financial management: track income/expenses, savings/investments, dashboards (ECharts), reports, spending limits & notifications. Supports n8n and external databases.
- * Version: 0.5.89.3
+ * Version: 0.5.90.1
  * Author: SIMKU
  * License: GPLv2 or later
  */
@@ -10,7 +10,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class SIMAK_App_Simak {
-  const VERSION = '0.5.89.3';
+  const VERSION = '0.5.90.1';
 
     const OPT_SETTINGS = 'simak_settings_v1';
     const OPT_CHARTS   = 'simak_charts_v1';
@@ -49,6 +49,7 @@ final class SIMAK_App_Simak {
 
         // PDF export endpoints (must run outside admin.php rendering).
         add_action('admin_post_simku_export_report_pdf', [$this, 'handle_export_report_pdf']);
+        add_action('admin_post_simku_export_report_csv', [$this, 'handle_export_report_csv']);
 
         add_action('wp_ajax_simak_chart_data', [$this, 'ajax_chart_data']);
         add_action('wp_ajax_nopriv_simak_chart_data', [$this, 'ajax_chart_data']);
@@ -328,7 +329,7 @@ final class SIMAK_App_Simak {
                 'email_new_body_tpl' => "New transaction created\n"
                     . "User: {user}\n"
                     . "Category: {kategori}\n"
-                    . "Merchant: {toko}\n"
+                    . "Counterparty: {toko}\n"
                     . "Item: {item}\n"
                     . "Qty: {qty}\n"
                     . "Price: {harga}\n"
@@ -345,7 +346,7 @@ final class SIMAK_App_Simak {
                 'telegram_new_tpl' => "✅ <b>New transaction</b>\n"
                     . "User: <b>{user}</b>\n"
                     . "Category: <b>{kategori}</b>\n"
-                    . "Merchant: {toko}\n"
+                    . "Counterparty: {toko}\n"
                     . "Item: {item}\n"
                     . "Qty: {qty}\n"
                     . "Price: {harga}\n"
@@ -2112,7 +2113,42 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
             return;
         }
 
-        // Handle delete
+        
+        // View description for a transaction line
+        if (!empty($_GET['view_desc']) && !empty($_GET['line_id'])) {
+            $line_id = sanitize_text_field(wp_unslash($_GET['line_id']));
+            $row = $db->get_row($db->prepare(
+                "SELECT line_id, transaction_id, items, kategori, tanggal_input, tanggal_struk, description FROM {$table} WHERE line_id = %s LIMIT 1",
+                $line_id
+            ), ARRAY_A);
+
+            echo '<div class="wrap">';
+            echo '<h1>Transaction Description</h1>';
+            echo '<p><a class="button" href="' . esc_url(admin_url('admin.php?page=fl-transactions')) . '">Back</a></p>';
+
+            if (!$row) {
+                echo '<div class="notice notice-error"><p>Transaction not found.</p></div>';
+                echo '</div>';
+                return;
+            }
+
+            $cat_norm = $this->normalize_category((string)($row['kategori'] ?? ''));
+            $date_label = ($cat_norm === 'income') ? 'Receive Date' : 'Purchase Date';
+            $date_val = (string)($row['tanggal_struk'] ?? '');
+
+            echo '<p><strong>Transaction ID:</strong> ' . esc_html($row['transaction_id'] ?? '') . '</p>';
+            echo '<p><strong>Item:</strong> ' . esc_html($row['items'] ?? '') . '</p>';
+            echo '<p><strong>Category:</strong> ' . esc_html($this->category_label((string)($row['kategori'] ?? ''))) . '</p>';
+            echo '<p><strong>Entry Date:</strong> ' . esc_html($this->fmt_mysql_dt_display((string)($row['tanggal_input'] ?? ''))) . '</p>';
+            echo '<p><strong>' . esc_html($date_label) . ':</strong> ' . esc_html($date_val !== '' ? $date_val : 'N/A') . '</p>';
+
+            echo '<div class="simku-desc-box"><pre style="white-space:pre-wrap;margin:0;">' . esc_html((string)($row['description'] ?? '')) . '</pre></div>';
+
+            echo '</div>';
+            return;
+        }
+
+// Handle delete
         if (!empty($_GET['fl_action']) && $_GET['fl_action'] === 'delete' && current_user_can(self::CAP_MANAGE_TX)) {
             check_admin_referer('fl_delete_tx');
             $line_id = isset($_GET['line_id']) ? sanitize_text_field(wp_unslash($_GET['line_id'])) : '';
@@ -2136,19 +2172,26 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
             's' => isset($_GET['s']) ? sanitize_text_field(wp_unslash($_GET['s'])) : '',
             'kategori' => isset($_GET['kategori']) ? sanitize_text_field(wp_unslash($_GET['kategori'])) : '',
             'user' => isset($_GET['user']) ? sanitize_text_field(wp_unslash($_GET['user'])) : '',
+            // Date filter applies to the selected date field
+            'date_field' => isset($_GET['date_field']) ? sanitize_text_field(wp_unslash($_GET['date_field'])) : 'entry',
             'date_from' => isset($_GET['date_from']) ? sanitize_text_field(wp_unslash($_GET['date_from'])) : '',
             'date_to' => isset($_GET['date_to']) ? sanitize_text_field(wp_unslash($_GET['date_to'])) : '',
         ];
 
+
         // v0.5.38: normalize legacy category name
         if (!empty($q['kategori'])) $q['kategori'] = $this->normalize_category((string)$q['kategori']);
+        // Normalize date field
+        $q['date_field'] = $this->reports_sanitize_date_field((string)($q['date_field'] ?? 'entry'));
+
 
         $where = "1=1";
         $params = [];
         if ($q['s']) {
-            $where .= " AND (transaction_id LIKE %s OR line_id LIKE %s OR nama_toko LIKE %s OR items LIKE %s OR description LIKE %s)";
+            // Search across multiple fields (IDs, party, item, category, price, qty, description)
+            $where .= " AND (transaction_id LIKE %s OR line_id LIKE %s OR nama_toko LIKE %s OR items LIKE %s OR kategori LIKE %s OR CAST(harga AS CHAR) LIKE %s OR CAST(quantity AS CHAR) LIKE %s OR description LIKE %s)";
             $like = '%' . $db->esc_like($q['s']) . '%';
-            $params += [$like, $like, $like, $like, $like];
+            $params += [$like, $like, $like, $like, $like, $like, $like, $like];
         }
         if ($q['kategori']) {
             if ($q['kategori'] === 'expense') {
@@ -2160,13 +2203,30 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
                 $params[] = $q['kategori'];
             }
         }
+        // Date filtering (Entry / Purchase / Receive)
+        $date_col = 'tanggal_input';
+        if ($q['date_field'] === 'purchase' || $q['date_field'] === 'receive') {
+            $date_col = 'tanggal_struk';
+            // If user didn't explicitly filter by category, constrain by semantic date type.
+            if (empty($q['kategori'])) {
+                if ($q['date_field'] === 'purchase') {
+                    $where .= " AND kategori IN (%s,%s)";
+                    $params[] = 'expense';
+                    $params[] = 'outcome';
+                } elseif ($q['date_field'] === 'receive') {
+                    $where .= " AND kategori = %s";
+                    $params[] = 'income';
+                }
+            }
+        }
+
         if ($q['date_from']) {
-            $where .= " AND tanggal_input >= %s";
-            $params[] = $q['date_from'] . ' 00:00:00';
+            $where .= " AND {$date_col} >= %s";
+            $params[] = ($date_col === 'tanggal_input') ? ($q['date_from'] . ' 00:00:00') : $q['date_from'];
         }
         if ($q['date_to']) {
-            $where .= " AND tanggal_input <= %s";
-            $params[] = $q['date_to'] . ' 23:59:59';
+            $where .= " AND {$date_col} <= %s";
+            $params[] = ($date_col === 'tanggal_input') ? ($q['date_to'] . ' 23:59:59') : $q['date_to'];
         }
 
 
@@ -2255,8 +2315,20 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
                 printf('<option value="%s"%s>%s</option>', esc_attr($uopt), selected($q['user'], $uopt, false), esc_html($uopt));
             }
             echo '</select>';
-            echo '</div>';
+echo '</div>';
         }
+
+
+        // Date Field selector
+        echo '<div class="fl-field fl-field-date-field">';
+        echo '<label>Date Field</label>';
+        echo '<select name="date_field">';
+        printf('<option value="entry"%s>Entry Date</option>', selected($q['date_field'], 'entry', false));
+        printf('<option value="purchase"%s>Purchase Date</option>', selected($q['date_field'], 'purchase', false));
+        printf('<option value="receive"%s>Receive Date</option>', selected($q['date_field'], 'receive', false));
+        echo '</select>';
+        echo '</div>';
+
 
         echo '<div class="fl-field fl-field-from">';
         echo '<label>From</label>';
@@ -2279,17 +2351,18 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
         // Use auto table layout for better responsive scrolling on mobile.
         echo '<div class="fl-table-wrap"><table class="widefat striped simku-table">';
         echo '<thead><tr>';
-        $cols = [
+	        $cols = [
             'line_id' => 'Line ID',
             'transaction_id' => 'Transaction ID',
             'user' => 'User',
-            'nama_toko' => 'Merchant',
+	            'nama_toko' => 'Counterparty',
             'items' => 'Item',
             'quantity' => 'Qty',
             'harga' => 'Price',
             'kategori' => 'Category',
             'tanggal_input' => 'Entry Date',
-            'tanggal_struk' => 'Purchase Date',
+            'purchase_date' => 'Purchase Date',
+            'receive_date' => 'Receive Date',
             'gambar_url' => 'Image',
             'description' => 'Description',
             'actions' => 'Actions',
@@ -2327,7 +2400,14 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
                 echo '<td>Rp '.esc_html(number_format_i18n((float)($r['harga'] ?? 0))).'</td>';
                 echo '<td>'.esc_html($this->category_label((string)($r['kategori'] ?? ''))).'</td>';
                 echo '<td>'.esc_html($this->fmt_mysql_dt_display((string)($r['tanggal_input'] ?? ''))).'</td>';
-                echo '<td>'.esc_html($r['tanggal_struk'] ?? '').'</td>';
+                $cat_norm_row = $this->normalize_category((string)($r['kategori'] ?? ''));
+                $is_income = ($cat_norm_row === 'income');
+                $is_expense = in_array($cat_norm_row, ['expense','outcome'], true);
+                $struk = (string)($r['tanggal_struk'] ?? '');
+                $purchase_disp = $is_expense ? ($struk !== '' ? $struk : 'N/A') : 'N/A';
+                $receive_disp  = $is_income  ? ($struk !== '' ? $struk : 'N/A') : 'N/A';
+                echo '<td>'.esc_html($purchase_disp).'</td>';
+                echo '<td>'.esc_html($receive_disp).'</td>';
                 $imgs = $this->normalize_images_field($r['gambar_url'] ?? '');
                 if (!empty($imgs)) {
                     $label = (count($imgs) > 1) ? ('View (' . count($imgs) . ')') : 'View';
@@ -2336,11 +2416,19 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
                 } else {
                     echo '<td></td>';
                 }
-                echo '<td class="fl-cell-wrap">'.esc_html($r['description'] ?? '').'</td>';
-                echo '<td>';
+                $desc = trim((string)($r['description'] ?? ''));
+                if ($desc !== '') {
+                    $view_desc_url = admin_url('admin.php?page=fl-transactions&view_desc=1&line_id=' . rawurlencode((string)$r['line_id']));
+                    echo '<td><a class="button button-small" href="'.esc_url($view_desc_url).'">View</a></td>';
+                } else {
+                    echo '<td></td>';
+                }
+                echo '<td class="fl-actions-col">';
                 if (current_user_can(self::CAP_MANAGE_TX)) {
-                    echo '<a class="button button-small" href="'.esc_url($edit_url).'">Edit</a> ';
+                    echo '<div class="simku-actions">';
+                    echo '<a class="button button-small" href="'.esc_url($edit_url).'">Edit</a>';
                     echo '<a class="button button-small button-link-delete" href="'.esc_url($del_url).'" onclick="return confirm(\'Delete this row?\')">Delete</a>';
+                    echo '</div>';
                 } else {
                     echo '<span class="fl-muted">—</span>';
                 }
@@ -2616,7 +2704,7 @@ private function calc_totals_between(string $start_dt, string $end_dt, string $d
                 echo '<td>'.esc_html($r['institution'] ?? '').'</td>';
                 echo '<td>'.esc_html($r['wp_user_login'] ?? '').'</td>';
                 echo '<td class="fl-cell-wrap">'.esc_html($r['notes'] ?? '').'</td>';
-                echo '<td>';
+                echo '<td class="fl-actions-col">';
                 if (current_user_can(self::CAP_MANAGE_TX)) {
                     echo '<a class="button button-small" href="'.esc_url($edit_url).'">Edit</a> ';
                     echo '<a class="button button-small button-link-delete" href="'.esc_url($del_url).'" onclick="return confirm(\'Delete this saving?\')">Delete</a>';
@@ -3839,20 +3927,21 @@ private function export_pdf_report(string $title, array $tot, array $meta = []) 
         $end_dt = (string)($meta['end_dt'] ?? '');
         $date_basis = $this->sanitize_date_basis((string)($meta['date_basis'] ?? 'input'));
         $user_login = (string)($meta['user_login'] ?? '');
+        $tx_type = $this->reports_sanitize_tx_type((string)($meta['tx_type'] ?? 'all'));
 
         // Fetch detailed rows for the report table (per-item rows).
         $rows = [];
         $truncated = false;
         if ($start_dt !== '' && $end_dt !== '') {
             $limit = 2000;
-            $rows = $this->fetch_report_detail_rows($start_dt, $end_dt, $date_basis, $limit + 1, ($user_login !== '' && $user_login !== 'all' && $user_login !== '0') ? $user_login : null);
+            $rows = $this->fetch_report_detail_rows($start_dt, $end_dt, $date_basis, $limit + 1, ($user_login !== '' && $user_login !== 'all' && $user_login !== '0') ? $user_login : null, $tx_type);
             if (count($rows) > $limit) {
                 $truncated = true;
                 $rows = array_slice($rows, 0, $limit);
             }
         }
 
-        $pages = $this->build_report_pdf_pages($title, $generated, $range_display, $tot, $rows, $truncated);
+        $pages = $this->build_report_pdf_pages($title, $generated, $range_display, $tot, $rows, $truncated, $tx_type);
         $pdf = $this->simple_pdf_pages($pages, [
             'F1' => 'Helvetica',
             'F2' => 'Helvetica-Bold',
@@ -3867,7 +3956,7 @@ private function export_pdf_report(string $title, array $tot, array $meta = []) 
     }
 
     
-private function fetch_report_detail_rows(string $start_dt, string $end_dt, string $date_basis, int $limit = 2000, ?string $user_login = null) : array {
+private function fetch_report_detail_rows(string $start_dt, string $end_dt, string $date_basis, int $limit = 2000, ?string $user_login = null, string $tx_type = 'all') : array {
     $db = $this->ds_db();
     if (!($db instanceof wpdb)) return [];
 
@@ -3877,7 +3966,11 @@ private function fetch_report_detail_rows(string $start_dt, string $end_dt, stri
     $purchase_expr = $this->ds_column_exists('tanggal_struk') ? "DATE(tanggal_struk)" : "NULL";
     $entry_expr    = $this->ds_column_exists('tanggal_input') ? "tanggal_input" : "NULL";
 
-    $select = "line_id, transaction_id, nama_toko, items, quantity, harga, kategori, {$purchase_expr} AS purchase_date, {$entry_expr} AS entry_date";
+    $user_col = $this->tx_user_col();
+    $user_expr = ($user_col && $this->ds_column_exists($user_col)) ? "`{$user_col}`" : "NULL";
+    $desc_expr = $this->ds_column_exists('description') ? "description" : "NULL";
+
+    $select = "line_id, transaction_id, {$user_expr} AS tx_user, nama_toko, items, quantity, harga, kategori, {$purchase_expr} AS purchase_date, {$entry_expr} AS entry_date, {$desc_expr} AS description";
 
     $where = "{$date_expr} >= %s AND {$date_expr} < %s";
     $params = [$start_dt, $end_dt];
@@ -3911,7 +4004,20 @@ private function fetch_report_detail_rows(string $start_dt, string $end_dt, stri
         }
     }
 
-    $limit = max(1, (int)$limit);
+    
+    // Optional transaction type filter for reports (All / Income / Expense).
+    $tx_type = $this->reports_sanitize_tx_type((string)$tx_type);
+    if ($tx_type === 'income') {
+        $where .= " AND LOWER(kategori) = 'income'";
+    } elseif ($tx_type === 'expense') {
+        $expense_cats = $this->get_expense_categories();
+        if (empty($expense_cats)) $expense_cats = ['expense'];
+        $cats_in = implode(',', array_fill(0, count($expense_cats), '%s'));
+        $where .= " AND LOWER(kategori) IN ($cats_in)";
+        $params = array_merge($params, $expense_cats);
+    }
+
+$limit = max(1, (int)$limit);
 
     $sql = "SELECT {$select}
             FROM `{$table}`
@@ -3924,14 +4030,21 @@ private function fetch_report_detail_rows(string $start_dt, string $end_dt, stri
 }
 
     
-private function build_report_pdf_pages(string $title, string $generated, string $range_display, array $tot, array $rows, bool $truncated) : array {
+private function build_report_pdf_pages(string $title, string $generated, string $range_display, array $tot, array $rows, bool $truncated, string $tx_type = 'all') : array {
         // Vector-PDF pages with basic text + grid table. Supports multi-page with repeating headers.
         $page_w = 595; $page_h = 842; // A4 points
         $left = 48; $right = 48;
         $top = 780; $bottom = 60;
 
         // Table layout
-        $headers = ['Purchase Date','Merchant','Category','Item','Qty','Price'];
+	    	$tx_type = $this->reports_sanitize_tx_type((string)$tx_type);
+        if ($tx_type === 'income') {
+            $headers = ['Receive Date','Source','Category','Item','Qty','Price'];
+        } elseif ($tx_type === 'expense') {
+            $headers = ['Purchase Date','Payee','Category','Item','Qty','Price'];
+        } else {
+            $headers = ['Date','Payee/Source','Category','Item','Qty','Price'];
+        }
         // Make the Price column a bit wider so numbers don't stick to the right border.
         // Keep overall table width the same by taking a bit from the Item column.
         $col_w = [80, 100, 85, 140, 35, 55]; // total 495 (max content width is 595-48-48=499)
@@ -4011,10 +4124,18 @@ private function build_report_pdf_pages(string $title, string $generated, string
             if ($page_no === 1) {
                 $s .= $this->pdf_text_cmd($left, $y, 12, "Summary Report:", 'F2');
                 $y -= 14;
+                if ($tx_type === 'income') {
+                $s .= $this->pdf_text_cmd($left, $y, 12, "Income: {$income}", 'F1');
+                $y -= 12;
+            } elseif ($tx_type === 'expense') {
+                $s .= $this->pdf_text_cmd($left, $y, 12, "Expense: {$expense}", 'F1');
+                $y -= 12;
+            } else {
                 $s .= $this->pdf_text_cmd($left, $y, 12, "Income: {$income}", 'F1');
                 $y -= 12;
                 $s .= $this->pdf_text_cmd($left, $y, 12, "Expense: {$expense}", 'F1');
                 $y -= 12;
+            }
                 // Balance line removed
 
                 $s .= $this->pdf_line_cmd($left, $y, $page_w - $right, $y, 0.8);
@@ -5038,7 +5159,7 @@ echo '</div></div>';
             echo '<div class="fl-field"><label>Line ID (PK) <span class="fl-muted">(optional, auto)</span></label><input type="text" class="fl-input" name="line_id" value="'.esc_attr($v['line_id']).'" placeholder="Auto generated if empty" /></div>';
         }
         echo '<div class="fl-field"><label>Transaction ID</label><input type="text" class="fl-input" name="transaction_id" value="'.esc_attr($v['transaction_id']).'" placeholder="Auto from Line ID if empty" /></div>';
-        echo '<div class="fl-field"><label>Merchant</label><input type="text" class="fl-input" name="nama_toko" value="'.esc_attr($v['nama_toko']).'" /></div>';
+	        echo '<div class="fl-field"><label>Counterparty</label><input type="text" class="fl-input" name="nama_toko" value="'.esc_attr($v['nama_toko']).'" placeholder="Example: FamilyMart / Dana / Salary / Bank Transfer" /></div>';
         if ($is_edit) {
         echo '<div class="fl-field"><label>Item</label><input type="text" class="fl-input" name="items" value="'.esc_attr($v['items']).'" required /></div>';
         echo '<div class="fl-grid fl-grid-2">';
@@ -5060,7 +5181,7 @@ echo '</div></div>';
         echo '</div>';
     }
 
-        echo '<div class="fl-field"><label>Category</label><select class="fl-input" name="kategori">';
+        echo '<div class="fl-field"><label>Category</label><select id="simku_kategori" class="fl-input" name="kategori">';
         foreach (['expense','income','saving','invest'] as $cat) {
             echo '<option value="'.esc_attr($cat).'" '.selected($v['kategori'],$cat,false).'>'.esc_html($this->category_label($cat)).'</option>';
         }
@@ -5073,7 +5194,8 @@ echo '</div></div>';
         // datetime-local expects 2026-01-03T20:50
         $ti_local = $this->dtlocal_value_from_mysql((string)($v['tanggal_input'] ?? ''));
         echo '<div class="fl-field"><label>Entry Date</label><input type="datetime-local" class="fl-input" name="tanggal_input" value="'.esc_attr($ti_local).'" /></div>';
-        echo '<div class="fl-field"><label>Purchase Date</label><input type="date" class="fl-input" name="tanggal_struk" value="'.esc_attr($v['tanggal_struk']).'" /></div>';
+        $receipt_label = ($this->normalize_category((string)($v['kategori'] ?? '')) === 'income') ? 'Receive Date' : 'Purchase Date';
+        echo '<div class="fl-field"><label id="simku_receipt_date_label">'.esc_html($receipt_label).'</label><input type="date" class="fl-input" name="tanggal_struk" value="'.esc_attr($v['tanggal_struk']).'" /></div>';
         // Images (multi)
         echo '<div class="fl-field"><label>Upload Images</label>';
         echo '<div class="fl-filepicker">';
@@ -5175,6 +5297,41 @@ echo '</div></div>';
 })();
 </script>';
         }
+
+                // UI: for Income category, rename "Purchase Date" label to "Receive Date".
+                echo '<script>(function(){
+        '
+                    . 'function syncSimkuReceiptLabel(){
+        '
+                    . '  var sel = document.getElementById("simku_kategori") || document.querySelector("select[name=\"kategori\"]");
+        '
+                    . '  var lbl = document.getElementById("simku_receipt_date_label");
+        '
+                    . '  if(!sel || !lbl) return;
+        '
+                    . '  var v = String(sel.value || "").toLowerCase();
+        '
+                    . '  lbl.textContent = (v === "income") ? "Receive Date" : "Purchase Date";
+        '
+                    . '}
+        '
+                    . 'function bind(){
+        '
+                    . '  var sel = document.getElementById("simku_kategori") || document.querySelector("select[name=\"kategori\"]");
+        '
+                    . '  if(!sel) return;
+        '
+                    . '  sel.addEventListener("change", syncSimkuReceiptLabel);
+        '
+                    . '  sel.addEventListener("input", syncSimkuReceiptLabel);
+        '
+                    . '}
+        '
+                    . 'bind();
+        '
+                    . 'syncSimkuReceiptLabel();
+        '
+                    . '})();</script>';
 
 
 
@@ -5661,7 +5818,7 @@ echo '</div></div>';
             }
 
             echo '<div class="fl-grid fl-grid-2">';
-            echo '<div class="fl-field"><label>Merchant</label><input class="fl-input" name="nama_toko" value="'.esc_attr($merchant).'" placeholder="Example: FamilyMart / Superindo" /></div>';
+	            echo '<div class="fl-field"><label>Counterparty</label><input class="fl-input" name="nama_toko" value="'.esc_attr($merchant).'" placeholder="Example: FamilyMart / Dana / Salary / Bank Transfer" /></div>';
             echo '<div class="fl-field"><label>Category</label><select class="fl-input" name="kategori">';
             foreach (['expense','income','saving','invest'] as $cat) {
                 echo '<option value="'.esc_attr($cat).'" '.selected($kategori_default,$cat,false).'>'.esc_html($this->category_label($cat)).'</option>';
@@ -5787,19 +5944,24 @@ public function handle_export_report_pdf() : void {
             if ($cu && !empty($cu->user_login)) $user_login = $cu->user_login;
         }
 
+        $tx_type = isset($_POST['report_tx_type']) ? $this->reports_sanitize_tx_type(sanitize_text_field(wp_unslash($_POST['report_tx_type'])) ) : 'all';
+
         if ($tab === 'daily') {
             $date = isset($_POST['report_date']) ? sanitize_text_field(wp_unslash($_POST['report_date'])) : wp_date('Y-m-d');
             $start = $date . ' 00:00:00';
             $end = wp_date('Y-m-d 00:00:00', strtotime($date . ' +1 day'));
             $tot = $this->calc_totals_between($start, $end, $date_basis, $user_login);
 
-            $this->export_pdf_report("Daily report: {$date}", $tot, [
+            $report_title = ($tx_type === 'income') ? "Daily income report: {$date}" : (($tx_type === 'expense') ? "Daily expense report: {$date}" : "Daily report: {$date}");
+
+            $this->export_pdf_report($report_title, $tot, [
                 'report_type'   => 'daily',
                 'range_display' => $date,
                 'start_dt'      => $start,
                 'end_dt'        => $end,
                 'date_basis'    => $date_basis,
                 'user_login'    => $user_login,
+                'tx_type'      => $tx_type,
             ]);
             return;
         }
@@ -5814,13 +5976,16 @@ public function handle_export_report_pdf() : void {
             $from_disp = wp_date('d/m/Y', strtotime($from));
             $to_disp   = wp_date('d/m/Y', strtotime($to));
 
-            $this->export_pdf_report("Weekly report", $tot, [
+            $report_title = ($tx_type === 'income') ? "Weekly income report" : (($tx_type === 'expense') ? "Weekly expense report" : "Weekly report");
+
+            $this->export_pdf_report($report_title, $tot, [
                 'report_type'   => 'weekly',
                 'range_display' => "{$from_disp} - {$to_disp}",
                 'start_dt'      => $start,
                 'end_dt'        => $end,
                 'date_basis'    => $date_basis,
                 'user_login'    => $user_login,
+                'tx_type'      => $tx_type,
             ]);
             return;
         }
@@ -5831,15 +5996,153 @@ public function handle_export_report_pdf() : void {
         $end = wp_date('Y-m-01 00:00:00', strtotime($start . ' +1 month'));
         $tot = $this->calc_totals_between($start, $end, $date_basis, $user_login);
 
-        $this->export_pdf_report("Monthly report", $tot, [
+        $report_title = ($tx_type === 'income') ? "Monthly income report" : (($tx_type === 'expense') ? "Monthly expense report" : "Monthly report");
+
+        $this->export_pdf_report($report_title, $tot, [
             'report_type'   => 'monthly',
             'range_display' => $month,
             'start_dt'      => $start,
             'end_dt'        => $end,
             'date_basis'    => $date_basis,
             'user_login'    => $user_login,
+                'tx_type'      => $tx_type,
         ]);
+    
     }
+
+    public function handle_export_report_csv() : void {
+        if (!current_user_can(self::CAP_VIEW_REPORTS)) wp_die('Forbidden');
+        check_admin_referer('simku_export_report_csv');
+
+        $tab = isset($_POST['report_tab']) ? sanitize_text_field(wp_unslash($_POST['report_tab'])) : 'daily';
+        $tab = in_array($tab, ['daily','weekly','monthly'], true) ? $tab : 'daily';
+
+        // Reports currently use Entry Date (tanggal_input) as the basis (same as PDF export).
+        $date_basis = 'input';
+
+        // User filter (default: all users). Non-admins are restricted to their own login.
+        $user_login = isset($_POST['report_user']) ? sanitize_text_field(wp_unslash($_POST['report_user'])) : 'all';
+        if ($user_login === '' || $user_login === '0') $user_login = 'all';
+        if (!current_user_can('manage_options')) {
+            $cu = wp_get_current_user();
+            if ($cu && !empty($cu->user_login)) $user_login = $cu->user_login;
+        }
+
+        $tx_type = isset($_POST['report_tx_type']) ? $this->reports_sanitize_tx_type(sanitize_text_field(wp_unslash($_POST['report_tx_type']))) : 'all';
+
+        $start = ''; $end = ''; $range_display = '';
+        if ($tab === 'daily') {
+            $date = isset($_POST['report_date']) ? sanitize_text_field(wp_unslash($_POST['report_date'])) : wp_date('Y-m-d');
+            $start = $date . ' 00:00:00';
+            $end = wp_date('Y-m-d 00:00:00', strtotime($date . ' +1 day'));
+            $range_display = $date;
+        } elseif ($tab === 'weekly') {
+            $from = isset($_POST['report_from']) ? sanitize_text_field(wp_unslash($_POST['report_from'])) : wp_date('Y-m-d', strtotime('monday this week'));
+            $to = isset($_POST['report_to']) ? sanitize_text_field(wp_unslash($_POST['report_to'])) : wp_date('Y-m-d', strtotime('sunday this week'));
+            $start = $from . ' 00:00:00';
+            $end = wp_date('Y-m-d 00:00:00', strtotime($to . ' +1 day'));
+            $range_display = "{$from} - {$to}";
+        } else { // monthly
+            $month = isset($_POST['report_month']) ? sanitize_text_field(wp_unslash($_POST['report_month'])) : wp_date('Y-m');
+            $start = $month . '-01 00:00:00';
+            $end = wp_date('Y-m-01 00:00:00', strtotime($start . ' +1 month'));
+            $range_display = $month;
+        }
+
+        $limit = 200000; // safety cap for large exports
+        $rows = $this->fetch_report_detail_rows(
+            $start,
+            $end,
+            $date_basis,
+            $limit,
+            ($user_login !== '' && $user_login !== 'all' && $user_login !== '0') ? $user_login : null,
+            $tx_type
+        );
+
+        $title = ($tx_type === 'income') ? "Report income {$tab} {$range_display}"
+              : (($tx_type === 'expense') ? "Report expense {$tab} {$range_display}" : "Report {$tab} {$range_display}");
+
+        $filename = sanitize_file_name(strtolower(str_replace([' ',':','/'], '_', $title))).'.csv';
+
+        // Clean any accidental output before headers.
+        if (function_exists('ob_get_length') && ob_get_length()) { @ob_end_clean(); }
+
+        nocache_headers();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="'.$filename.'"');
+
+        $out = fopen('php://output', 'w');
+
+        // CSV headers (Payee + Source are always present for easier Excel analysis).
+        fputcsv($out, [
+            'Entry Date',
+            'Purchase Date',
+            'Receive Date',
+            'Payee',
+            'Source',
+            'Category',
+            'Item',
+            'Qty',
+            'Price',
+            'Total',
+            'Description',
+            'Transaction ID',
+            'Line ID',
+            'User',
+        ]);
+
+        foreach ((array)$rows as $r) {
+            $cat_raw = strtolower(trim((string)($r['kategori'] ?? '')));
+            $is_income = ($cat_raw === 'income');
+
+            $counterparty = (string)($r['nama_toko'] ?? '');
+            $payee = $is_income ? 'N/A' : $counterparty;
+            $source = $is_income ? $counterparty : 'N/A';
+
+            $purchase_date = '';
+            $receive_date = '';
+            $d = (string)($r['purchase_date'] ?? '');
+            if ($d !== '' && $d !== '0000-00-00') {
+                if ($is_income) $receive_date = $d;
+                else $purchase_date = $d;
+            }
+
+            $entry_date = (string)($r['entry_date'] ?? '');
+            $item = (string)($r['items'] ?? '');
+            $qty = (string)($r['quantity'] ?? '');
+            $price = (string)($r['harga'] ?? '');
+            $total = '';
+            if (is_numeric($qty) && is_numeric($price)) {
+                $total = (string)((float)$qty * (float)$price);
+            }
+
+            $desc = (string)($r['description'] ?? '');
+            $tx_id = (string)($r['transaction_id'] ?? '');
+            $line_id = (string)($r['line_id'] ?? '');
+            $user_val = (string)($r['tx_user'] ?? '');
+
+            fputcsv($out, [
+                $entry_date,
+                $purchase_date !== '' ? $purchase_date : 'N/A',
+                $receive_date !== '' ? $receive_date : 'N/A',
+                $payee !== '' ? $payee : 'N/A',
+                $source !== '' ? $source : 'N/A',
+                (string)($r['kategori'] ?? ''),
+                $item,
+                $qty,
+                $price,
+                $total,
+                $desc,
+                $tx_id,
+                $line_id,
+                $user_val,
+            ]);
+        }
+
+        fclose($out);
+        exit;
+    }
+
 
 
 public function page_reports() : void {
@@ -5847,6 +6150,7 @@ public function page_reports() : void {
 
         $tab = isset($_GET['tab']) ? sanitize_text_field(wp_unslash($_GET['tab'])) : 'daily';
         $user_param = isset($_GET['user']) ? sanitize_text_field(wp_unslash($_GET['user'])) : '';
+        $type_param = isset($_GET['type']) ? sanitize_text_field(wp_unslash($_GET['type'])) : '';
 
         echo '<div class="wrap fl-wrap">';
         echo $this->page_header_html('Reports', '[simku_reports]', '[simku page="reports"]');
@@ -5854,6 +6158,7 @@ public function page_reports() : void {
         foreach (['daily'=>'Daily','weekly'=>'Weekly (Custom)','monthly'=>'Monthly'] as $k=>$label) {
             $args = ['page'=>'fl-reports','tab'=>$k];
             if ($user_param !== '' && $user_param !== '0') $args['user'] = $user_param;
+            if ($type_param !== '' && $type_param !== '0') $args['type'] = $type_param;
             $url = add_query_arg($args, admin_url('admin.php'));
             echo '<a class="nav-tab '.($tab===$k?'nav-tab-active':'').'" href="'.esc_url($url).'">'.esc_html($label).'</a>';
         }
@@ -5917,6 +6222,41 @@ public function page_reports() : void {
         echo $html;
         echo '</div>';
     }
+
+    /**
+     * Reports "Category" filter (Income / Expense / All).
+     * We keep the request parameter name as `type` for backward-compatibility.
+     */
+    private function reports_sanitize_tx_type(string $raw) : string {
+        $v = strtolower(trim((string)$raw));
+        if ($v === '' || $v === '0' || $v === 'all' || $v === 'all_categories' || $v === 'all categories') return 'all';
+        if ($v === 'income' || $v === 'in') return 'income';
+        if ($v === 'expense' || $v === 'expenses' || $v === 'exp') return 'expense';
+        return 'all';
+    }
+
+    /**
+     * Transactions date filter selector: Entry / Purchase / Receive.
+     */
+    private function reports_sanitize_date_field(string $raw) : string {
+        $v = strtolower(trim((string)$raw));
+        if ($v === 'purchase' || $v === 'receive' || $v === 'entry') return $v;
+        return 'entry';
+    }
+
+    private function reports_render_type_dropdown(string $selected) : void {
+        $selected = $this->reports_sanitize_tx_type($selected);
+
+        echo '<div class="simku-filter-field simku-filter-type">';
+        echo '<label for="simku_report_type">Category</label>';
+        echo '<select id="simku_report_type" name="type" class="simku-input">';
+        echo '<option value="all"'.selected($selected, 'all', false).'>All categories</option>';
+        echo '<option value="income"'.selected($selected, 'income', false).'>Income</option>';
+        echo '<option value="expense"'.selected($selected, 'expense', false).'>Expense</option>';
+        echo '</select>';
+        echo '</div>';
+    }
+
 
     /**
      * Normalize date input from browser/datepicker into ISO Y-m-d.
@@ -5989,6 +6329,7 @@ public function page_reports() : void {
     private function report_daily() : void {
         $date = isset($_GET['date']) ? sanitize_text_field(wp_unslash($_GET['date'])) : wp_date('Y-m-d');
         $user_login = $this->reports_get_user_filter($_GET, 'user');
+        $tx_type = isset($_GET['type']) ? $this->reports_sanitize_tx_type(sanitize_text_field(wp_unslash($_GET['type'])) ) : 'all';
 
         $start = $date . ' 00:00:00';
         $end = wp_date('Y-m-d 00:00:00', strtotime($date . ' +1 day'));
@@ -5999,6 +6340,7 @@ public function page_reports() : void {
         echo '<input type="hidden" name="tab" value="daily" />';
         echo '<div class="simku-filter-field simku-filter-date"><label for="simku_report_date">Date</label><input id="simku_report_date" type="date" name="date" value="'.esc_attr($date).'" /></div>';
         $this->reports_render_user_dropdown($user_login);
+        $this->reports_render_type_dropdown($tx_type);
         echo '<div class="simku-filter-actions"><button class="button">Run</button></div>';
         echo '</form>';
 
@@ -6010,10 +6352,24 @@ public function page_reports() : void {
         echo '<input type="hidden" name="report_tab" value="daily" />';
         echo '<input type="hidden" name="report_date" value="'.esc_attr($date).'" />';
         echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<input type="hidden" name="report_tx_type" value="'.esc_attr($tx_type).'" />';
         echo '<button class="button">Export PDF</button>';
         echo '</form>';
 
-        $this->render_report_summary("Daily report: {$date}", $tot);
+        // Export CSV
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline fl-inline-secondary">';
+        wp_nonce_field('simku_export_report_csv');
+        echo '<input type="hidden" name="action" value="simku_export_report_csv" />';
+        echo '<input type="hidden" name="simku_export_report_csv" value="1" />';
+        echo '<input type="hidden" name="report_tab" value="daily" />';
+        echo '<input type="hidden" name="report_date" value="'.esc_attr($date).'" />';
+        echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<input type="hidden" name="report_tx_type" value="'.esc_attr($tx_type).'" />';
+        echo '<button class="button">Export CSV</button>';
+        echo '</form>';
+
+        $ui_title = ($tx_type === 'income') ? "Daily income report: {$date}" : (($tx_type === 'expense') ? "Daily expense report: {$date}" : "Daily report: {$date}");
+        $this->render_report_summary($ui_title, $tot, $tx_type);
     }
 
     private function report_weekly_custom() : void {
@@ -6022,6 +6378,8 @@ public function page_reports() : void {
         $user_login = $this->reports_get_user_filter($_GET, 'user');
 
         // inclusive end date -> end dt +1 day
+        $tx_type = isset($_GET['type']) ? $this->reports_sanitize_tx_type(sanitize_text_field(wp_unslash($_GET['type'])) ) : 'all';
+
         $start = $from . ' 00:00:00';
         $end = wp_date('Y-m-d 00:00:00', strtotime($to . ' +1 day'));
         $tot = $this->calc_totals_between($start, $end, 'input', $user_login);
@@ -6032,7 +6390,8 @@ public function page_reports() : void {
         echo '<div class="simku-filter-field simku-filter-from"><label for="simku_report_from">From</label><input id="simku_report_from" type="date" name="from" value="'.esc_attr($from).'" /></div>';
         echo '<div class="simku-filter-field simku-filter-to"><label for="simku_report_to">To</label><input id="simku_report_to" type="date" name="to" value="'.esc_attr($to).'" /></div>';
         $this->reports_render_user_dropdown($user_login);
-        echo '<div class="simku-filter-actions"><button class="button">Run</button></div>';
+        $this->reports_render_type_dropdown($tx_type);
+        echo '<div class=\"simku-filter-actions\"><button class="button">Run</button></div>';
         echo '</form>';
 
         // Export PDF
@@ -6044,15 +6403,31 @@ public function page_reports() : void {
         echo '<input type="hidden" name="report_from" value="'.esc_attr($from).'" />';
         echo '<input type="hidden" name="report_to" value="'.esc_attr($to).'" />';
         echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<input type="hidden" name="report_tx_type" value="'.esc_attr($tx_type).'" />';
         echo '<button class="button">Export PDF</button>';
         echo '</form>';
 
-        $this->render_report_summary("Weekly report: {$from} → {$to}", $tot);
+        // Export CSV
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline fl-inline-secondary">';
+        wp_nonce_field('simku_export_report_csv');
+        echo '<input type="hidden" name="action" value="simku_export_report_csv" />';
+        echo '<input type="hidden" name="simku_export_report_csv" value="1" />';
+        echo '<input type="hidden" name="report_tab" value="weekly" />';
+        echo '<input type="hidden" name="report_from" value="'.esc_attr($from).'" />';
+        echo '<input type="hidden" name="report_to" value="'.esc_attr($to).'" />';
+        echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<input type="hidden" name="report_tx_type" value="'.esc_attr($tx_type).'" />';
+        echo '<button class="button">Export CSV</button>';
+        echo '</form>';
+
+        $ui_title = ($tx_type === 'income') ? "Weekly income report: {$from} → {$to}" : (($tx_type === 'expense') ? "Weekly expense report: {$from} → {$to}" : "Weekly report: {$from} → {$to}");
+        $this->render_report_summary($ui_title, $tot, $tx_type);
     }
 
     private function report_monthly() : void {
         $month = isset($_GET['month']) ? sanitize_text_field(wp_unslash($_GET['month'])) : wp_date('Y-m');
         $user_login = $this->reports_get_user_filter($_GET, 'user');
+        $tx_type = isset($_GET['type']) ? $this->reports_sanitize_tx_type(sanitize_text_field(wp_unslash($_GET['type'])) ) : 'all';
 
         $start = $month . '-01 00:00:00';
         $end = wp_date('Y-m-01 00:00:00', strtotime($start . ' +1 month'));
@@ -6063,7 +6438,8 @@ public function page_reports() : void {
         echo '<input type="hidden" name="tab" value="monthly" />';
         echo '<div class="simku-filter-field simku-filter-month"><label for="simku_report_month">Month</label><input id="simku_report_month" type="month" name="month" value="'.esc_attr($month).'" /></div>';
         $this->reports_render_user_dropdown($user_login);
-        echo '<div class="simku-filter-actions"><button class="button">Run</button></div>';
+        $this->reports_render_type_dropdown($tx_type);
+        echo '<div class=\"simku-filter-actions\"><button class="button">Run</button></div>';
         echo '</form>';
 
         // Export PDF
@@ -6074,29 +6450,51 @@ public function page_reports() : void {
         echo '<input type="hidden" name="report_tab" value="monthly" />';
         echo '<input type="hidden" name="report_month" value="'.esc_attr($month).'" />';
         echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<input type="hidden" name="report_tx_type" value="'.esc_attr($tx_type).'" />';
         echo '<button class="button">Export PDF</button>';
         echo '</form>';
 
-        $this->render_report_summary("Monthly report: {$month}", $tot);
+        // Export CSV
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" class="fl-inline fl-inline-secondary">';
+        wp_nonce_field('simku_export_report_csv');
+        echo '<input type="hidden" name="action" value="simku_export_report_csv" />';
+        echo '<input type="hidden" name="simku_export_report_csv" value="1" />';
+        echo '<input type="hidden" name="report_tab" value="monthly" />';
+        echo '<input type="hidden" name="report_month" value="'.esc_attr($month).'" />';
+        echo '<input type="hidden" name="report_user" value="'.esc_attr($user_login).'" />';
+        echo '<input type="hidden" name="report_tx_type" value="'.esc_attr($tx_type).'" />';
+        echo '<button class="button">Export CSV</button>';
+        echo '</form>';
+
+        $ui_title = ($tx_type === 'income') ? "Monthly income report: {$month}" : (($tx_type === 'expense') ? "Monthly expense report: {$month}" : "Monthly report: {$month}");
+        $this->render_report_summary($ui_title, $tot, $tx_type);
     }
 
-    private function render_report_summary(string $title, array $tot) : void {
+    private function render_report_summary(string $title, array $tot, string $tx_type = 'all') : void {
+        $tx_type = $this->reports_sanitize_tx_type($tx_type);
+
+        if ($tx_type === 'income') {
+            echo '<div class="fl-grid fl-grid-2 fl-mt">';
+            echo '<div class="fl-card"><div class="fl-kpi-label">'.$title.'</div><div class="fl-kpi-value">—</div></div>';
+            echo '<div class="fl-card"><div class="fl-kpi-label">Income</div><div class="fl-kpi-value">Rp '.esc_html(number_format_i18n((float)($tot['income'] ?? 0))).'</div></div>';
+            echo '</div>';
+            return;
+        }
+
+        if ($tx_type === 'expense') {
+            echo '<div class="fl-grid fl-grid-2 fl-mt">';
+            echo '<div class="fl-card"><div class="fl-kpi-label">'.$title.'</div><div class="fl-kpi-value">—</div></div>';
+            echo '<div class="fl-card"><div class="fl-kpi-label">Expense</div><div class="fl-kpi-value">Rp '.esc_html(number_format_i18n((float)($tot['expense'] ?? 0))).'</div></div>';
+            echo '</div>';
+            return;
+        }
+
+        // all
         echo '<div class="fl-grid fl-grid-3 fl-mt">';
         echo '<div class="fl-card"><div class="fl-kpi-label">'.$title.'</div><div class="fl-kpi-value">—</div></div>';
-        echo '<div class="fl-card"><div class="fl-kpi-label">Income</div><div class="fl-kpi-value">Rp '.esc_html(number_format_i18n($tot['income'])).'</div></div>';
-        echo '<div class="fl-card"><div class="fl-kpi-label">Expense</div><div class="fl-kpi-value">Rp '.esc_html(number_format_i18n($tot['expense'])).'</div></div>';
+        echo '<div class="fl-card"><div class="fl-kpi-label">Income</div><div class="fl-kpi-value">Rp '.esc_html(number_format_i18n((float)($tot['income'] ?? 0))).'</div></div>';
+        echo '<div class="fl-card"><div class="fl-kpi-label">Expense</div><div class="fl-kpi-value">Rp '.esc_html(number_format_i18n((float)($tot['expense'] ?? 0))).'</div></div>';
         echo '</div>';
-
-        echo '<div class="fl-card fl-mt"><h3>Breakdown (amount_total)</h3>';
-        echo '<div class="fl-table-wrap"><table class="widefat striped"><thead><tr><th>kategori</th><th>Total</th></tr></thead><tbody>';
-        if (empty($tot['by_cat'])) {
-            echo '<tr><td colspan="2"><em>No data for selected range.</em></td></tr>';
-        } else {
-            foreach (($tot['by_cat'] ?? []) as $cat=>$amt) {
-                echo '<tr><td>'.esc_html($cat).'</td><td>Rp '.esc_html(number_format_i18n($amt)).'</td></tr>';
-            }
-        }
-        echo '</tbody></table></div></div>';
     }
 
     public function page_logs() : void {
@@ -6479,7 +6877,7 @@ public function page_reports() : void {
 
         echo '<div class="fl-field fl-full"><label>Email subject template <span class="fl-muted">(new transaction)</span></label>';
         echo '<input name="email_new_subject_tpl" value="'.esc_attr($s['notify']['email_new_subject_tpl'] ?? '').'" placeholder="New transaction: {item} (Rp {total})" />';
-        echo '<div class="fl-help">Placeholders: {user}, {kategori}, {toko}, {item}, {qty}, {harga}, {total}, {tanggal_input}, {transaction_id}, {line_id}</div>';
+        echo '<div class="fl-help">Placeholders: {user}, {kategori}, {toko}, {item}, {qty}, {harga}, {total}, {tanggal_input}, {tanggal_struk}, {transaction_id}, {line_id}, {gambar_url}, {description}</div>';
         echo '</div>';
 
         echo '<div class="fl-field fl-full"><label>Email body template <span class="fl-muted">(new transaction)</span></label>';
