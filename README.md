@@ -4,7 +4,7 @@ SIMKU is a WordPress plugin for simple financial management: track **income/expe
 It supports both **WordPress internal tables** and an **external MySQL/MariaDB database**.
 
 **Version:** 0.5.89.6  
-**License:** GPL-2.0-or-later
+**License:** MIT Licenses
 
 ---
 
