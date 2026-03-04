@@ -1,0 +1,1274 @@
+/* SIMKU admin UI — aligned with Reseller Product Manager style (clean WP admin look) */
+
+:root{
+  --simku-font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen-Sans,Ubuntu,Cantarell,"Helvetica Neue",sans-serif;
+  --simku-bg:#f0f0f1;
+  --simku-card:#ffffff;
+  --simku-border:#dcdcde;
+  --simku-text:#1d2327;
+  --simku-muted:#646970;
+  --simku-shadow:0 1px 2px rgba(0,0,0,.03);
+}
+
+body.toplevel_page_simku-keuangan,
+body.simku_page_fl-dashboard,
+body.simku_page_fl-add-transaction,
+body.simku_page_fl-transactions,
+body.simku_page_fl-reports,
+body.simku_page_fl-charts,
+body.simku_page_fl-add-chart,
+body.simku_page_fl-settings,
+body.simku_page_fl-logs,
+body.simku_page_fl-scan-struk,
+body.simku_page_fl-savings,
+body.simku_page_fl-add-saving,
+body.simku_page_fl-reminders,
+body.simku_page_fl-add-reminder,
+body.simku_page_fl-payment-reminders,
+body.simku_page_fl-add-payment-reminder{
+  background:var(--simku-bg) !important;
+  font-family:var(--simku-font) !important;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+.fl-wrap{
+  max-width:none;
+  /*
+    NOTE:
+    Admin pages use <div class="wrap fl-wrap">.
+    WordPress core gives .wrap a right margin (20px). If we force width:100%,
+    the element becomes 100% + margin-right → it overflows, making the right
+    spacing look like it's “stuck” to the edge.
+    Using width:auto lets WP margins work as intended.
+  */
+  width:auto;
+  box-sizing:border-box;
+  color:var(--simku-text);
+  font-family:var(--simku-font);
+}
+
+
+/* Page gutter: add comfortable space around all SIMKU admin pages */
+.wrap.fl-wrap{
+  margin: 16px 16px 28px 16px !important;
+}
+
+.fl-page-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+}
+.fl-wrap h1{
+  margin:0 0 12px 0;
+  font-size:24px;
+  font-weight:700;
+}
+.fl-wrap h2{
+  margin:0 0 12px 0;
+  font-size:16px;
+  font-weight:600;
+}
+.fl-muted{ color: var(--simku-muted); font-size:12px; }
+
+/* Cards */
+.fl-card{
+  background:var(--simku-card);
+  border:1px solid var(--simku-border);
+  border-radius:14px;
+  padding:14px;
+  box-shadow:var(--simku-shadow);
+  overflow: visible;
+}
+
+
+/* Vertical stack helper (used in Settings to ensure consistent spacing between cards) */
+.fl-stack{
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+}
+
+.fl-card-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+  padding:0;
+  border:0;
+}
+.fl-card-body{
+  padding:0;
+}
+.fl-card-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.fl-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+
+.fl-card.fl-card-split{ padding:0; }
+.fl-card.fl-card-split .fl-card-head{ padding:14px 14px 0; margin-bottom:8px; }
+.fl-card.fl-card-split .fl-card-body{ padding:0 14px 14px; }
+
+/* Grid */
+.fl-grid{ display:grid; gap:12px; }
+.fl-grid-2{ grid-template-columns:1fr 1fr; }
+.fl-grid-3{ grid-template-columns:repeat(3,1fr); }
+@media (max-width: 960px){
+  .fl-grid-2,.fl-grid-3{ grid-template-columns:1fr; }
+}
+
+/* Forms */
+.fl-field{ margin-bottom:12px; }
+.fl-field label{
+  display:block;
+  font-weight:600;
+  margin:0 0 6px 0;
+}
+.fl-field .fl-help{
+  color: var(--simku-muted);
+  font-size:12px;
+  margin-top:4px;
+}
+.fl-wrap input[type="text"],
+.fl-wrap input[type="search"],
+.fl-wrap input[type="number"],
+.fl-wrap input[type="url"],
+.fl-wrap input[type="email"],
+.fl-wrap input[type="date"],
+.fl-wrap input[type="datetime-local"],
+.fl-wrap textarea,
+.fl-wrap select{
+  width:100%;
+  max-width:none;
+  box-sizing:border-box;
+}
+
+/* Textareas: make them more comfortable by default (many pages use notes/description) */
+.fl-wrap textarea.fl-input,
+.fl-wrap textarea{
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.35;
+}
+
+/* Check rows: consistent spacing (used in Scan Receipt + notifications) */
+.fl-check-row{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:10px 16px;
+  align-items:start;
+}
+@media (max-width: 782px){
+  .fl-check-row{ grid-template-columns: 1fr; }
+}
+
+/* File input (match other full-width inputs) */
+.fl-wrap input[type="file"].fl-input{
+  width:100%;
+  max-width:none;
+  box-sizing:border-box;
+}
+
+/* Savings attachments: give a bit more breathing room before actions */
+.simku-saving-attachments{ margin-bottom:16px; }
+.simku-saving-btnrow{ margin-top:6px; }
+
+/* Transactions: tags picker (multi-select) */
+.simku-tags-field .simku-tags-picker{
+  height: 96px;
+}
+.simku-tags-field .simku-tags-picker option{
+  padding: 2px 6px;
+}
+@media (max-width: 782px){
+  .simku-tags-field .simku-tags-picker{ height: 120px; }
+}
+
+/* Button rows (keep WordPress default button styles) */
+.fl-btnrow{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+@media (max-width: 782px){
+  .fl-btnrow{ flex-direction:column; align-items:stretch; }
+}
+
+/* Knowledge panel (Add Reminder) */
+.fl-knowledge{
+  font-size: 13px;
+  line-height: 1.45;
+}
+.fl-knowledge-list{
+  margin: 0;
+  padding-left: 18px;
+}
+.fl-knowledge-list li{
+  margin: 0 0 8px 0;
+}
+.fl-divider{
+  border-top: 1px solid #e5e5e5;
+}
+
+
+
+/* Modern Guide Card (Add/Edit Reminder) */
+.fl-guide-card{
+  background:#fff;
+  border:1px solid var(--simku-border);
+  border-radius:16px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  padding:14px;
+  margin-top:16px;
+  position: sticky;
+  top: 14px;
+}
+.fl-guide-header{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding-bottom:10px;
+  border-bottom:1px solid #ececec;
+  margin-bottom:10px;
+}
+.fl-guide-title{
+  font-size:14px;
+  font-weight:700;
+  margin:0;
+}
+.fl-guide-subtitle{
+  font-size:12px;
+  opacity:0.8;
+  margin:0;
+}
+.fl-guide-body{
+  font-size:13px;
+  line-height:1.55;
+  max-height: calc(100vh - 220px);
+  overflow:auto;
+  padding-right:6px;
+}
+
+/* Accordion sections */
+.fl-guide-section{
+  margin:10px 0 0 0;
+  border:1px solid #ededed;
+  border-radius:12px;
+  background:#fbfbfb;
+}
+.fl-guide-section[open]{
+  background:#fff;
+}
+.fl-guide-section summary{
+  cursor:pointer;
+  font-weight:650;
+  list-style:none;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  margin:0;
+}
+.fl-guide-section summary::-webkit-details-marker{ display:none; }
+.fl-guide-section summary::marker{ content:''; }
+.fl-guide-section summary:after{
+  content:'▾';
+  opacity:0.65;
+  font-size:12px;
+}
+.fl-guide-section[open] summary:after{
+  content:'▴';
+}
+
+.fl-guide-content{
+  padding:10px 12px 12px 12px;
+  border-top:1px solid #efefef;
+}
+.fl-guide-item{
+  margin:0 0 10px 0;
+}
+.fl-guide-item:last-child{
+  margin-bottom:0;
+}
+.fl-guide-item b{
+  display:block;
+  margin-bottom:2px;
+}
+.fl-guide-hint{
+  margin:0;
+  opacity:0.95;
+}
+.fl-guide-content code{
+  font-size:12px;
+  padding:1px 6px;
+  border:1px solid #e5e5e5;
+  border-radius:999px;
+  background:#fafafa;
+}
+
+
+/* Tables */
+.fl-table-wrap{
+  overflow-x:auto !important;
+  overflow-y:visible !important;
+  border-radius:12px;
+  border:1px solid var(--simku-border);
+  background:#fff;
+}
+.fl-wrap table.widefat{
+  margin:0;
+  border:0;
+  box-shadow:none;
+}
+.fl-actions-col{ white-space:nowrap; vertical-align:middle; }
+.fl-cell-wrap{ max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+
+
+/* Transactions list: tidy action buttons + description view */
+.simku-actions{
+  display:flex;
+  flex-direction:row;
+  gap:8px;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  white-space:nowrap;
+}
+.simku-actions .button{
+  margin:0 !important;
+  width:fit-content;
+}
+.simku-desc-box{
+  max-width: 980px;
+  background:#fff;
+  border:1px solid var(--simku-border);
+  border-radius:12px;
+  padding:14px;
+  box-shadow:var(--simku-shadow);
+}
+/* KPI cards (used in Dashboard / Overview) */
+.fl-kpi{
+  background:#fff;
+  border:1px solid var(--simku-border);
+  border-radius:14px;
+  padding:14px;
+  box-shadow:var(--simku-shadow);
+}
+.fl-kpi-label{ color:var(--simku-muted); font-size:12px; font-weight:600; }
+.fl-kpi-value{ font-size:22px; font-weight:700; margin-top:4px; }
+
+/* Chart containers */
+.fl-chart-box{height:320px;min-height:280px;}
+.fl-chart-box-admin{height:260px;}
+.fl-dash-widget-block{margin:10px 0 18px;}
+.fl-dash-widget-title{font-weight:600;margin:0 0 6px;}
+
+/* Chart Builder layout */
+.fl-builder-shell{display:grid;grid-template-columns: 280px 1fr;gap:14px;margin-top:10px;}
+.fl-builder-shell.fl-sql-mode{grid-template-columns:1fr;}
+@media (max-width: 1100px){.fl-builder-shell{grid-template-columns:1fr;}}
+
+/* Helpers */
+.fl-inline{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
+
+
+/* Reports filter (Daily/Weekly/Monthly) */
+.simku-filter-field{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.simku-filter-field label{ font-size:12px; font-weight:600; color:var(--simku-muted); margin:0; }
+
+.simku-report-filter{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:flex-end;
+}
+.simku-report-filter .simku-filter-field input,
+.simku-report-filter .simku-filter-field select{
+  height:36px;
+  min-height:36px;
+}
+
+/* Desktop sizing (prevents the first date field from stretching too wide) */
+.simku-report-filter .simku-filter-date,
+.simku-report-filter .simku-filter-from,
+.simku-report-filter .simku-filter-to,
+.simku-report-filter .simku-filter-month{
+  flex:0 0 170px;
+  min-width:170px;
+}
+.simku-report-filter .simku-filter-user{
+  flex:0 0 200px;
+  min-width:200px;
+}
+
+.simku-report-filter .simku-filter-actions{ flex:0 0 auto; }
+.simku-report-filter .simku-filter-actions .button{
+  height:36px;
+  min-height:36px;
+  padding:0 14px;
+}
+.simku-report-filter .simku-filter-actions .button + .button{ margin-left:8px; }
+
+/* Budgets: Add / Update Budget form should align fields in a clean grid (desktop). */
+.simku-report-filter.simku-budget-form{
+  display:grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap:12px;
+  align-items:end;
+
+  /* Keep the form compact on wide screens (less wasted horizontal space). */
+  max-width:1150px;
+  margin-left:0;
+  margin-right:auto;
+}
+.simku-budget-form .simku-filter-month,
+.simku-budget-form .simku-filter-category,
+.simku-budget-form .simku-filter-user,
+.simku-budget-form .simku-filter-amount{
+  grid-column: span 3;
+  min-width:0;
+}
+
+/* Row: tags (wider), manual tags, actions (narrow) */
+.simku-budget-form .simku-filter-tags{
+  grid-column: span 6;
+  min-width:0;
+}
+.simku-budget-form .simku-filter-tags-manual{
+  grid-column: span 6;
+  min-width:0;
+}
+.simku-budget-form .simku-filter-tags select,
+.simku-budget-form .simku-filter-tags-manual input{
+  width:100%;
+  min-width:0;
+}
+.simku-budget-form .simku-filter-tags select{
+  /* Make multi-select comfortable to use (show more rows). */
+  min-height:130px;
+}
+.simku-budget-form .simku-filter-actions{
+  grid-column: span 2;
+  display:flex;
+  flex-wrap:wrap;
+  /* Keep Save/Cancel close to Manual Tags (less empty space) and align with the input row. */
+  justify-content:flex-start;
+  align-items:flex-start;
+  align-self:start;
+  padding-top:22px;
+  gap:8px;
+}
+.simku-budget-form .simku-filter-actions .button + .button{ margin-left:0; }
+
+/* Dashboard Charts filter */
+.simku-dashboard-filter-card{ margin-top:18px; margin-bottom:12px; }
+.simku-dashboard-filter .simku-filter-group,
+.simku-dashboard-filter .simku-filter-basis{
+  flex:0 0 160px;
+  min-width:160px;
+}
+
+/* Secondary inline form spacing (Export PDF) */
+.fl-inline-secondary{ margin-left:8px; }
+
+/* Mobile: always stack neatly (even when browser is set to “Desktop site”) */
+@media (max-width: 782px), (max-device-width: 782px), (hover: none) and (pointer: coarse){
+  .simku-report-filter{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+    align-items:stretch;
+  }
+  .simku-report-filter .simku-filter-date,
+  .simku-report-filter .simku-filter-from,
+  .simku-report-filter .simku-filter-to,
+  .simku-report-filter .simku-filter-month,
+  .simku-report-filter .simku-filter-user{
+    min-width:0;
+    width:100%;
+  }
+  .simku-report-filter .simku-filter-actions .button{
+    width:100%;
+    justify-content:center;
+  }
+
+  /* Budget form: avoid implicit columns on mobile (force full-width fields). */
+  .simku-budget-form .simku-filter-month,
+  .simku-budget-form .simku-filter-category,
+  .simku-budget-form .simku-filter-user,
+  .simku-budget-form .simku-filter-amount,
+  .simku-budget-form .simku-filter-tags,
+  .simku-budget-form .simku-filter-tags-manual,
+  .simku-budget-form .simku-filter-actions{
+    grid-column: 1 / -1;
+  }
+  .simku-budget-form .simku-filter-actions{ padding-top:0; }
+  .fl-inline-secondary{ margin-left:0; }
+}
+.fl-template{ font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
+.fl-full{ grid-column:1 / -1; }
+.fl-mini{ padding:12px; border-radius:12px; background:#fafafa; border:1px solid #eee; }
+.fl-mini h3{ margin:0 0 10px; font-size:13px; font-weight:600; }
+.fl-pill{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; border:1px solid rgba(15,23,42,.10); background:rgba(255,255,255,.8); font-size:12px; font-weight:600; color:var(--simku-muted); }
+.fl-check label{ display:flex; gap:8px; align-items:center; font-weight:600; }
+.fl-check input[type="checkbox"]{ margin-top:0; }
+.fl-check-group{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.fl-code{ background:#0b1220; color:#e6edf3; border-radius:12px; padding:12px; overflow:auto; }
+.fl-wrap .notice{ border-radius:12px; }
+
+/* Kebab menu (header actions) */
+.fl-head-actions{ position:relative; display:inline-block; }
+.fl-kebab{
+  cursor:pointer;
+  border:1px solid transparent;
+  background:transparent;
+  border-radius:8px;
+  padding:0 10px;
+  height:34px;
+  line-height:32px;
+  font-size:18px;
+}
+.fl-kebab:hover{ background:#f0f0f1; border-color:#ccd0d4; }
+.fl-kebab-dots{ display:inline-block; transform: translateY(-1px); }
+.fl-menu{
+  position:absolute;
+  right:0;
+  top:38px;
+  background:#fff;
+  border:1px solid #ccd0d4;
+  border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+  min-width:220px;
+  padding:8px;
+  z-index:100000;
+}
+.fl-menu-item{
+  display:block;
+  width:100%;
+  text-align:left;
+  border:0;
+  background:transparent;
+  padding:8px 10px;
+  border-radius:8px;
+  cursor:pointer;
+}
+.fl-menu-item:hover{ background:#f0f0f1; }
+
+/* Spacing helpers */
+.fl-mt{ margin-top:12px; }
+.fl-mt-sm{ margin-top:8px; }
+
+/* KPI grid */
+.fl-kpis{ display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+@media (max-width: 960px){ .fl-kpis{ grid-template-columns:1fr; } }
+
+/* Filter forms */
+.fl-dashboard-filter label{ display:flex; align-items:center; gap:6px; margin:0; }
+.fl-dashboard-filter label input,
+.fl-dashboard-filter label select{ width:auto; }
+.fl-inline label select{ width:auto; }
+
+
+/* --------------------------------------------------------------------------
+   Mobile-first UI refinements (tables/charts/buttons + line-items labels)
+   -------------------------------------------------------------------------- */
+
+.fl-wrap .notice {
+  margin: 12px 0;
+}
+
+/* Filter grid (Transactions list) */
+.fl-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.fl-filters-grid .fl-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+/* Transactions filters: compact */
+.simku-tx-filters{ margin-bottom:12px; }
+
+/* Transactions table: add breathing room */
+body.simku_page_fl-transactions table.widefat th,
+body.simku_page_fl-transactions table.widefat td{
+  padding-top:10px;
+  padding-bottom:10px;
+  line-height:1.35;
+}
+
+.simku-tx-filters .fl-filters-grid{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:flex-end;
+}
+.simku-tx-filters .fl-field{
+  margin-bottom:0;
+}
+.simku-tx-filters .fl-field-search{
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+.simku-tx-filters .fl-field-category{
+  flex: 1 1 220px;
+  max-width: 300px;
+}
+.simku-tx-filters .fl-field-user{
+  flex: 1 1 200px;
+  max-width: 260px;
+}
+.simku-tx-filters .fl-field-from,
+.simku-tx-filters .fl-field-to{
+  flex: 0 1 180px;
+  max-width: 210px;
+}
+.simku-tx-filters .fl-filter-actions{
+  flex: 0 0 auto;
+}
+
+@media (max-width: 782px){
+  .simku-tx-filters .fl-filters-grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:10px;
+    align-items:end;
+  }
+  .simku-tx-filters .fl-filter-actions{
+    grid-column: 1 / -1;
+  }
+  .simku-tx-filters .fl-filter-actions .button{
+    width:100%;
+    justify-content:center;
+  }
+}
+
+/* Add Transaction spacing */
+.simku-addtx-form{
+  margin-top:12px;
+}
+
+
+/* -------------------------------------------------------------------------
+   Scan Receipt page layout polish
+---------------------------------------------------------------------------*/
+/* Default = stacked (mobile-first). This fixes "Desktop site" mode on phones too. */
+.simku-scan-layout{
+  display:grid;
+  margin-top:12px;
+  margin-bottom:12px;
+  grid-template-columns: 1fr;
+  gap:14px;
+  align-items:start;
+  grid-template-areas:
+    "upload"
+    "image"
+    "result";
+}
+
+/* Wide screens: 2-column layout */
+@media (min-width: 1100px){
+  .simku-scan-layout{
+    grid-template-columns: minmax(280px, 420px) 1fr;
+    grid-template-areas:
+      "upload result"
+      "image  result";
+  }
+}
+
+.simku-scan-layout .simku-scan-card{ margin-top:0 !important; }
+.simku-scan-layout .simku-scan-card-upload{ grid-area: upload; }
+.simku-scan-layout .simku-scan-card-image{ grid-area: image; }
+.simku-scan-layout .simku-scan-card-result{ grid-area: result; }
+
+/* Upload form layout */
+.simku-scan-upload-grid3{
+  display:grid;
+  grid-template-columns: 1fr;
+  gap:12px;
+  align-items:stretch;
+}
+.simku-scan-upload-info{
+  border:1px solid var(--simku-border);
+  background:#f6f7f7;
+  border-radius:12px;
+  padding:10px 12px;
+}
+.simku-scan-upload-info .fl-help{ margin:0 0 8px; }
+.simku-scan-upload-info .fl-help:last-child{ margin-bottom:0; }
+
+.simku-scan-upload-file{
+  border:1px solid var(--simku-border);
+  background:#fff;
+  border-radius:12px;
+  padding:10px 12px;
+}
+.simku-scan-upload-file .fl-field{ margin:0; }
+.simku-scan-upload-file .fl-filepicker{ flex-wrap:wrap; }
+.simku-scan-upload-file .fl-file-names{ flex:1 1 auto; min-width:0; word-break:break-word; }
+.simku-scan-upload-file .simak-upload-hint{ width:100%; margin-top:6px; color:#646970; font-size:12px; }
+
+.simku-scan-upload-actions{ display:block; }
+.simku-scan-upload-actions .button-primary{
+  width:100%;
+  height:40px;
+  min-height:40px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* Preview image: hard cap height so it never "runs away" */
+.simku-scan-layout .simku-scan-preview-wrap{
+  /* Fallback */
+  max-height: 320px;
+  /* Modern browsers */
+  max-height: clamp(220px, 35vh, 320px);
+  overflow:hidden !important;
+  border-radius:12px;
+  background:#f6f7f7;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:6px;
+}
+.simku-scan-layout .simku-scan-preview-img{
+  max-width:100% !important;
+  /* Match wrap max-height */
+  max-height: 320px !important;
+  max-height: clamp(220px, 35vh, 320px) !important;
+  width:auto !important;
+  height:auto !important;
+  object-fit:contain;
+  display:block;
+  border:1px solid var(--simku-border);
+  border-radius:10px;
+}
+.simku-scan-preview-actions{ margin-top:10px; }
+.simku-scan-preview-actions .button{ width:100%; }
+
+/* Scan fields (Result preview): aligned desktop layout */
+.simku-scan-card-result .simku-scan-fields-grid{
+  display:grid;
+  grid-template-columns: 1fr;
+  gap:16px;
+  align-items:start;
+  margin: 6px 0 14px;
+  max-width: 720px;
+}
+.simku-scan-card-result .simku-scan-fields-left{
+  min-width:0;
+}
+
+.simku-scan-card-result .simku-scan-tags .simku-tags-picker{ width:100%; }
+
+@media (max-width: 1100px){
+  .simku-scan-card-result .simku-scan-fields-grid{
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Give the scan result card breathing room so WP footer doesn't feel like it sits inside the card */
+.simku-scan-card-result{ margin-bottom: 36px; }
+
+/* Action buttons on result card */
+.simku-scan-card-result .fl-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:14px;
+}
+.simku-scan-card-result .fl-actions .button-primary{ flex:1 1 220px; }
+.simku-scan-card-result .fl-actions .button{ flex:1 1 180px; }
+
+/* Submit actions (Save / View Transactions): normal sized buttons on desktop */
+.simku-scan-card-result .simku-scan-submit-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:flex-start;
+}
+.simku-scan-card-result .simku-scan-submit-actions .button,
+.simku-scan-card-result .simku-scan-submit-actions .button-primary{
+  flex:0 0 auto;
+  width:auto;
+  max-width:none;
+  min-width: 160px;
+  justify-content:center;
+}
+
+/* Scan description: bigger and responsive */
+.simku-scan-card-result .simku-scan-desc-textarea{
+  min-height: clamp(180px, 28vh, 340px);
+}
+
+/* Ensure description always uses full width */
+.simku-scan-card-result .simku-scan-description,
+.simku-scan-card-result .simku-scan-description textarea{
+  width:100% !important;
+  max-width:none !important;
+}
+
+/* Notify checkboxes: stack vertically and align left */
+.simku-scan-notify{
+  margin-top:8px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  align-items:flex-start;
+}
+.simku-scan-notify label{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+
+/* Mobile: buttons can be full-width for easier tapping */
+@media (max-width: 782px){
+  .simku-scan-card-result .simku-scan-submit-actions{
+    display:grid;
+    grid-template-columns: 1fr;
+  }
+  .simku-scan-card-result .simku-scan-submit-actions .button,
+  .simku-scan-card-result .simku-scan-submit-actions .button-primary{
+    width:100%;
+    min-width:0;
+  }
+}
+
+/* Mobile-friendly line items on Scan Receipt */
+@media (max-width: 600px){
+  .simku-scan-layout .simak-line-item-head{ display:none; }
+  .simku-scan-layout .simak-line-item-row{
+    grid-template-columns: 1fr 90px 34px;
+    grid-template-areas:
+      "name qty rm"
+      "price price rm";
+  }
+  .simku-scan-layout .simak-line-item-row input:nth-child(1){ grid-area:name; }
+  .simku-scan-layout .simak-line-item-row input:nth-child(2){ grid-area:qty; }
+  .simku-scan-layout .simak-line-item-row input:nth-child(3){ grid-area:price; }
+  .simku-scan-layout .simak-line-item-row button{ grid-area:rm; }
+}
+
+.simku-scan-layout .simku-scan-add-item-actions{ margin-top:10px; }
+.simku-scan-layout .simak-line-item-row input[type=number]{ text-align:right; }
+
+
+/* Line-items (Add Transaction & Scan Receipt) */
+.simak-line-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.simak-line-item-head,
+.simak-line-item-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 120px 34px;
+  gap: 8px;
+  align-items: center;
+}
+.simak-line-item-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: #57606a;
+  padding: 0 2px;
+}
+.simak-line-item-row .simak-remove-row {
+  min-width: 34px;
+  height: 34px;
+  line-height: 1;
+  padding: 0;
+}
+
+/* Tables: allow horizontal scroll on small screens (avoid “vertical text”) */
+.fl-table-wrap table.widefat {
+  table-layout: auto;
+}
+
+/* Ensure code/ids don't break character-by-character */
+.fl-table-wrap code,
+.fl-table-wrap td code {
+  white-space: nowrap;
+}
+
+@media (max-width: 782px) {
+  /* Symmetric page gutter on mobile (all sides) */
+  .wrap.fl-wrap{
+    margin: 12px 12px 20px 12px !important;
+  }
+
+  /* Buttons should feel “full width” on mobile */
+  .fl-btnrow .button,
+  .fl-actions .button,
+  .fl-actions .button-primary {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  .fl-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* Dashboard chart filter: nicer 2-column layout on mobile */
+  .fl-dashboard-filter {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: end;
+  }
+  .fl-dashboard-filter label {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    margin: 0;
+  }
+  .fl-dashboard-filter input,
+  .fl-dashboard-filter select {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .fl-dashboard-filter button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  /* Line-items grid tight for phone screens */
+  .simak-line-item-head,
+  .simak-line-item-row {
+    grid-template-columns: 1fr 70px 90px 34px;
+    gap: 6px;
+  }
+
+  /* Tables become horizontally scrollable (instead of squishing columns) */
+  .fl-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .fl-table-wrap table.widefat {
+    width: max-content;
+    min-width: 760px;
+  }
+  .fl-table-wrap th,
+  .fl-table-wrap td {
+    white-space: nowrap;
+  }
+
+  /* Chart boxes should not overflow container */
+  .fl-chart-box,
+  .fl-chart-box-admin {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  /* Give ECharts more vertical room so axis/tooltip/labels don't collide */
+  .fl-chart-box { height: 320px; min-height: 300px; }
+  .fl-chart-box-admin { height: 260px; }
+}
+
+
+
+/* Custom file picker (avoid huge native input area) */
+.fl-filepicker{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.fl-hidden-file{
+  position:absolute !important;
+  left:-9999px !important;
+  width:1px !important;
+  height:1px !important;
+  overflow:hidden !important;
+}
+.fl-file-names{
+  font-size:12px;
+  color:#6b7280;
+}
+.fl-tags{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.fl-tag{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border:1px solid #e5e7eb;
+  border-radius:999px;
+  background:#fff;
+  font-size:12px;
+}
+
+/* -------------------------------------------------------------------------
+   Pagination UI (bigger + centered + touch-friendly)
+---------------------------------------------------------------------------*/
+.fl-wrap .tablenav{
+  margin:12px 0 6px;
+}
+
+.fl-wrap .tablenav .tablenav-pages{
+  float:none;
+  width:100%;
+  text-align:center;
+  margin:0;
+}
+
+.fl-wrap .tablenav .tablenav-pages .page-numbers,
+.fl-wrap .tablenav .tablenav-pages .tablenav-pages-navspan,
+.fl-wrap .tablenav .tablenav-pages a.button,
+.fl-wrap .tablenav .tablenav-pages span.button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:38px;
+  height:38px;
+  padding:0 12px;
+  margin:0 4px 6px;
+  border:1px solid #c3c4c7;
+  border-radius:8px;
+  background:#fff;
+  font-size:14px;
+  line-height:1;
+  text-decoration:none;
+  box-sizing:border-box;
+}
+
+.fl-wrap .tablenav .tablenav-pages .page-numbers.current{
+  background:#2271b1;
+  border-color:#2271b1;
+  color:#fff;
+}
+
+.fl-wrap .tablenav .tablenav-pages .page-numbers:hover{
+  background:#f6f7f7;
+}
+
+@media (max-width: 782px){
+  .fl-wrap .tablenav .tablenav-pages .page-numbers,
+  .fl-wrap .tablenav .tablenav-pages .tablenav-pages-navspan,
+  .fl-wrap .tablenav .tablenav-pages a.button,
+  .fl-wrap .tablenav .tablenav-pages span.button{
+    min-width:44px;
+    height:44px;
+    font-size:15px;
+  }
+}
+
+
+
+
+/* Dashboard: ensure full width */
+body.simku_page_fl-dashboard .wrap.fl-wrap{max-width:none; width:calc(100% - 20px);}
+
+/* Reports: action bar + detail table */
+.simku-report-toolbar{display:flex;flex-wrap:nowrap;gap:10px;align-items:flex-end;margin:8px 0 12px;}
+.simku-report-toolbar form{margin:0;}
+.simku-report-toolbar .simku-report-filter{flex:0 1 auto;min-width:0;}
+
+/* Prevent WP footer overlay when inner content uses floats (WP footer is inside #wpbody-content). */
+.fl-wrap::after{content:"";display:block;clear:both;}
+
+@media (max-width: 1200px){
+	.simku-report-toolbar{flex-wrap:wrap;}
+	.simku-report-toolbar .simku-report-filter{flex:1 1 420px;min-width:420px;}
+}
+.fl-table-wrap{overflow:auto;}
+.widefat td.num, .widefat th.num{text-align:right;}
+
+
+
+/* Hide internal pages from submenu */
+
+/* Keep the Add Budget Target page accessible via direct URL, but hide it from the sidebar submenu. */
+#toplevel_page_simku-keuangan .wp-submenu a[href="admin.php?page=fl-add-budgeting"]{
+  display:none !important;
+}
+
+
+/* Settings page spacing improvements */
+body.simku_page_fl-settings .fl-card{
+  margin: 0 0 22px 0;
+}
+body.simku_page_fl-settings .fl-card:last-child{
+  margin-bottom: 0;
+}
+body.simku_page_fl-settings .fl-card h2{
+  margin: 0 0 10px 0;
+}
+body.simku_page_fl-settings .fl-card .fl-muted{
+  margin: 6px 0 12px 0;
+}
+body.simku_page_fl-settings .fl-actions{
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+
+/* Nested cards (Integrations section) */
+body.simku_page_fl-settings .fl-card .fl-card{
+  margin-top: 16px;
+}
+
+/* Schema blocks */
+body.simku_page_fl-settings h3{
+  margin: 18px 0 10px 0;
+}
+body.simku_page_fl-settings .fl-code{
+  margin: 10px 0 0 0;
+}
+body.simku_page_fl-settings .fl-hr{
+  margin: 16px 0;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Savings attachments: modal + existing thumbnails                    */
+/* ------------------------------------------------------------------ */
+.simku-modal{position:fixed;inset:0;z-index:100000;}
+.simku-modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.55);}
+.simku-modal-dialog{position:relative;max-width:920px;margin:6vh auto;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);overflow:hidden;}
+.simku-modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #e5e5e5;}
+.simku-modal-body{padding:12px 14px;max-height:70vh;overflow:auto;}
+.simku-modal-close{font-size:16px;text-decoration:none;}
+
+/* Notes viewer (Reminders list) */
+.simku-notes-box{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.55;}
+
+.simku-img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;}
+.simku-img-grid a{display:block;border:1px solid #e5e5e5;border-radius:10px;overflow:hidden;background:#fff;}
+.simku-img-grid img{width:100%;height:140px;object-fit:cover;display:block;}
+
+.simku-img-grid-sm{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));}
+.simku-img-grid-sm img{height:96px;}
+
+.simku-img-tile{display:flex;flex-direction:column;gap:6px;align-items:flex-start;border:1px solid #e5e5e5;border-radius:10px;padding:8px;background:#fff;}
+.simku-img-tile input{margin:0;}
+.simku-img-thumb{display:block;width:100%;}
+.simku-existing-attachments{margin-top:8px;}
+.simku-replace-all{margin-top:10px;}
+
+/* Settings: make section headers tighter */
+.simku-settings-section h3{margin:12px 0 8px 0;}
+
+
+/* Info tooltip (click-to-open) */
+.simku-label-with-help{ display:flex; align-items:center; gap:6px; }
+.simku-help{ position:relative; display:inline-flex; align-items:center; }
+.simku-help-icon{
+  border:0;
+  background:transparent;
+  padding:0;
+  margin:0;
+  cursor:pointer;
+  color:var(--simku-muted);
+  line-height:1;
+}
+.simku-help-icon .dashicons{ font-size:16px; width:16px; height:16px; }
+.simku-help-icon:hover{ color:#2271b1; }
+.simku-help-pop{
+  position:absolute;
+  top: calc(100% + 6px);
+  left:0;
+  z-index:100000;
+  width: min(360px, 88vw);
+  background:#fff;
+  border:1px solid #ccd0d4;
+  border-radius:10px;
+  box-shadow:0 10px 24px rgba(0,0,0,.12);
+  padding:10px 12px;
+  display:none;
+}
+.simku-help-pop.is-open{ display:block; }
+.simku-help-pop p{ margin:0 0 8px; }
+.simku-help-pop p:last-child{ margin-bottom:0; }
+
+/* Budget form: manual tags + actions inline */
+.simku-inline-row{ display:flex; gap:10px; align-items:center; }
+.simku-inline-row input{ flex:1 1 auto; min-width:0; }
+.simku-inline-actions{ display:flex; gap:8px; flex:0 0 auto; align-items:center; }
+
+@media (max-width: 782px), (max-device-width: 782px), (hover: none) and (pointer: coarse){
+  .simku-inline-row{ flex-direction:column; align-items:stretch; }
+  .simku-inline-actions .button{ width:100%; justify-content:center; }
+}
+
+
+/* Reports: PDF layout controls */
+.simku-pdf-layout{margin:8px 0 0;padding:8px 10px;border:1px solid #e6e8eb;border-radius:12px;background:#fafbfc;}
+.simku-pdf-layout > summary{cursor:pointer;font-weight:600;color:#1d2327;list-style:none;}
+.simku-pdf-layout > summary::-webkit-details-marker{display:none;}
+.simku-pdf-layout[open] > summary{margin-bottom:8px;}
+.simku-pdf-options-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px;align-items:end;}
+.simku-pdf-options-grid .simku-filter-field{margin:0;grid-column:span 3;}
+/* Layout / Content / Orientation / Header / Footer / Logo */
+.simku-pdf-options-grid .simku-filter-field:nth-child(1){grid-column:span 3;}
+.simku-pdf-options-grid .simku-filter-field:nth-child(2){grid-column:span 3;}
+.simku-pdf-options-grid .simku-filter-field:nth-child(3){grid-column:span 2;}
+.simku-pdf-options-grid .simku-filter-field:nth-child(4){grid-column:span 2;}
+.simku-pdf-options-grid .simku-filter-field:nth-child(5){grid-column:span 2;}
+.simku-pdf-options-grid .simku-filter-field:nth-child(6){grid-column:span 4;}
+
+.simku-pdf-custom-fields{margin-top:10px;padding-top:10px;border-top:1px dashed #e0e3e7;}
+.simku-checkbox-grid{
+  display:grid;
+  /* Keep columns compact on wide screens (prevents huge empty gaps) */
+  grid-template-columns:repeat(3, minmax(160px, 220px));
+  justify-content:start;
+  gap:8px 12px;
+  max-width: 760px;
+}
+/* Reports: Breakdown has only 4 options; keep them on one tidy row on wide screens. */
+.simku-breakdown-grid{
+  grid-template-columns:repeat(4, minmax(140px, 1fr));
+  max-width: 720px;
+}
+.simku-checkbox{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin:0;
+  padding:6px 10px;
+  border:1px solid #e6e8eb;
+  border-radius:10px;
+  background:#fff;
+  cursor:pointer;
+  /* Keep a consistent touch target height (matches other controls) */
+  min-height:38px;
+}
+.simku-checkbox input{ margin:0; }
+/* Prevent any global input sizing rules from stretching checkboxes */
+.simku-checkbox input[type="checkbox"]{
+  width:16px !important;
+  height:16px !important;
+  min-width:16px;
+  min-height:16px;
+  flex:0 0 16px;
+  align-self:center;
+}
+.simku-checkbox span{ line-height:1.2; }
+.simku-checkbox:hover{ background:#f6f7f7; }
+
+@media (max-width: 1000px){
+  .simku-pdf-options-grid .simku-filter-field{grid-column:span 6;}
+}
+@media (max-width: 720px){
+  .simku-pdf-options-grid .simku-filter-field{grid-column:span 12;}
+  .simku-checkbox-grid{grid-template-columns:repeat(2, minmax(160px, 1fr));max-width:none;}
+}
+
+
+/* Reports: logo picker */
+.simku-logo-picker{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.simku-logo-preview img{width:42px;height:42px;object-fit:contain;border:1px solid #e6e8eb;border-radius:10px;background:#fff;padding:4px;}

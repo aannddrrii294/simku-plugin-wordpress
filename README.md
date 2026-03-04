@@ -1,10 +1,11 @@
-# SIMKU (Finance Manager) — WordPress Plugin
+# WP SIMKU (Sistem Management Keuangan) — WordPress Plugin
 
-SIMKU is a WordPress plugin for simple financial management: track **income/expenses**, manage **savings**, set **payment reminders**, view **dashboards & charts (ECharts)**, generate **reports (PDF export)**, and configure **spending limits & notifications**.  
+WP SIMKU (Sistem Management Keuangan) is a WordPress plugin for simple financial management: track **income/expenses**, manage **savings**, set **payment reminders**, view **dashboards & charts (ECharts)**, generate **reports (PDF export)**, and configure **spending limits & notifications**.  
 It supports both **WordPress internal tables** and an **external MySQL/MariaDB database**.
 
-**Version:** 0.5.89.6  
-**License:** MIT Licenses
+**Version:** 0.9.31.4
+**Author:** HONET (https://honet.web.id)
+**License:** GPL-2.0-or-later (see LICENSE)
 
 ---
 
@@ -66,10 +67,10 @@ Optional:
 
 ### Option A — WordPress Admin
 1. Go to **Plugins → Add New → Upload Plugin**
-2. Upload the SIMKU ZIP
-3. Activate **SIMKU (Finance Manager)**
+2. Upload the WP SIMKU ZIP
+3. Activate **WP SIMKU (Sistem Management Keuangan)**
 
 ### Option B — Manual
 1. Extract the plugin to:
    ```bash
-   wp-content/plugins/simku-keuangan/
+   wp-content/plugins/wp-simku/

@@ -1,0 +1,84 @@
+/* SIMKU Budgeting page layout helpers */
+
+.simku-budget-grid{
+  display:grid;
+  gap:12px;
+  /*
+   * Use fixed-ish columns and pack to the left.
+   * This avoids "jauh-jauh" spacing on wide screens.
+   */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 260px));
+  justify-content:start;
+  align-items:start;
+}
+
+/* Budget Target top row: keep Quick Links compact on wide screens */
+.simku-top-row{
+  display:grid;
+  gap:12px;
+  grid-template-columns: minmax(260px, 520px) 1fr;
+  align-items:start;
+}
+
+@media (max-width: 980px){
+  .simku-top-row{ grid-template-columns: 1fr; }
+}
+
+/* Budget Target % Used: tiny ECharts progress bar + label */
+.simku-pct-wrap{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width: 160px;
+}
+
+.simku-pct-chart{
+  width: 120px;
+  height: 14px;
+}
+
+.simku-pct-text{
+  white-space:nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.simku-budget-grid .simku-span-2{
+  grid-column: span 2;
+}
+
+.simku-budget-grid .simku-actions{
+  align-self:stretch;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+}
+
+@media (max-width: 782px){
+  .simku-budget-grid .simku-span-2{
+    grid-column: auto;
+  }
+}
+
+
+/* Budgets page: tighten inline form fields */
+.simku-budget-filter .simku-filter-user { flex: 0 0 260px; }
+.simku-budget-form .simku-filter-category { flex: 0 0 220px; }
+.simku-budget-form .simku-filter-user { flex: 0 0 220px; }
+.simku-budget-form .simku-filter-amount { flex: 0 0 220px; }
+.simku-budget-form .simku-filter-actions { margin-left: 0; }
+.simku-budget-form .simku-filter-field input[type="number"]{ width: 100%; }
+
+
+/* Add Budget Target: vertical form layout */
+.simku-form-vertical{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  max-width:760px;
+}
+
+.simku-form-vertical .fl-field input,
+.simku-form-vertical .fl-field select{
+  width:100%;
+  max-width:100%;
+}

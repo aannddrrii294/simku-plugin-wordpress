@@ -1,0 +1,25 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: WP SIMKU 0.8\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-15 00:00+0000\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. Plugin Name
+msgid "WP SIMKU (Sistem Management Keuangan)"
+msgstr ""
+
+msgid "WP SIMKU"
+msgstr ""
+
+msgid "Dashboard"
+msgstr ""
+
+msgid "Transactions"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
